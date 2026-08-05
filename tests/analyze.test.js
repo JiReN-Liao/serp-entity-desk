@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import analyzeHandler, { extractEntities, isPrivateIp, isSafePublicUrl } from '../api/analyze.js'
+import analyzeHandler, { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed } from '../api/analyze.js'
 import historyHandler from '../api/history.js'
 
 function mockResponse(resolve) {
@@ -60,11 +60,13 @@ test('history route rejects unauthenticated requests', async () => {
   assert.equal(response.status, 401)
 })
 
-test('public test mode rejects queries outside its fixed test query', async () => {
+test('public test mode rejects queries outside its fixed test query when any-query is off', async () => {
   const previousMode = process.env.PUBLIC_TEST_MODE
+  const previousAllowAny = process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
   const previousQuery = process.env.PUBLIC_TEST_QUERY
   try {
     process.env.PUBLIC_TEST_MODE = 'true'
+    process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = 'false'
     process.env.PUBLIC_TEST_QUERY = '4G 吃到飽'
     const response = await new Promise((resolve) => analyzeHandler(
       { method: 'POST', headers: {}, body: { query: '另一個查詢' } },
@@ -75,7 +77,14 @@ test('public test mode rejects queries outside its fixed test query', async () =
   } finally {
     if (previousMode === undefined) delete process.env.PUBLIC_TEST_MODE
     else process.env.PUBLIC_TEST_MODE = previousMode
+    if (previousAllowAny === undefined) delete process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+    else process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = previousAllowAny
     if (previousQuery === undefined) delete process.env.PUBLIC_TEST_QUERY
     else process.env.PUBLIC_TEST_QUERY = previousQuery
   }
+})
+
+test('public test mode can allow arbitrary queries when toggled on', () => {
+  assert.equal(isPublicTestQueryAllowed('另一個查詢', '4G 吃到飽', true), true)
+  assert.equal(isPublicTestQueryAllowed('另一個查詢', '4G 吃到飽', false), false)
 })

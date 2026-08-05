@@ -9,3 +9,4 @@ export const supabase = supabaseUrl && supabaseAnonKey
 
 export const demoAllowed = import.meta.env.VITE_DEMO_MODE !== 'false'
 export const publicTestAllowed = import.meta.env.VITE_PUBLIC_TEST_MODE === 'true'
+export const publicTestAllowAnyQuery = import.meta.env.VITE_PUBLIC_TEST_ALLOW_ANY_QUERY === 'true'

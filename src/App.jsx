@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { demoAllowed, publicTestAllowed, supabase } from './supabaseClient.js'
+import { demoAllowed, publicTestAllowed, publicTestAllowAnyQuery, supabase } from './supabaseClient.js'
 import { getDemoResult } from './demoData.js'
 
 const defaultQuery = '4G 吃到飽'
@@ -58,6 +58,7 @@ function App() {
       session={session}
       isDemo={isDemo}
       isPublicTest={publicTestAllowed}
+      allowAnyQuery={publicTestAllowAnyQuery}
       onDemoLogout={() => setIsDemo(false)}
     />
   )
@@ -189,7 +190,8 @@ function AuthScreen({ onDemo }) {
   )
 }
 
-function Dashboard({ session, isDemo, isPublicTest, onDemoLogout }) {
+function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout }) {
+  const publicQueryLocked = isPublicTest && !allowAnyQuery
   const [query, setQuery] = useState(defaultQuery)
   const [result, setResult] = useState(isDemo ? getDemoResult(defaultQuery) : null)
   const [history, setHistory] = useState([])
@@ -220,7 +222,7 @@ function Dashboard({ session, isDemo, isPublicTest, onDemoLogout }) {
 
   async function runAnalysis(event) {
     event?.preventDefault()
-    const nextQuery = isPublicTest ? defaultQuery : query.trim()
+    const nextQuery = publicQueryLocked ? defaultQuery : query.trim()
     if (nextQuery.length < 2) {
       setError('請輸入至少 2 個字元的查詢詞。')
       return
@@ -312,7 +314,7 @@ function Dashboard({ session, isDemo, isPublicTest, onDemoLogout }) {
             <span className={isDemo || isPublicTest ? 'status-dot demo' : 'status-dot'} />
             <div>
               <strong>{isDemo ? '展示模式' : isPublicTest ? '公開測試模式' : 'Live workspace'}</strong>
-              <span>{isDemo ? '固定資料' : isPublicTest ? '固定 query / 不保存' : 'Supabase session'}</span>
+              <span>{isDemo ? '固定資料' : isPublicTest ? (allowAnyQuery ? '任意 query / 不保存' : '固定 query / 不保存') : 'Supabase session'}</span>
             </div>
           </div>
           <button className="sidebar-logout" type="button" onClick={logout}>{isPublicTest ? '重新整理' : '登出'}</button>
@@ -336,7 +338,9 @@ function Dashboard({ session, isDemo, isPublicTest, onDemoLogout }) {
             <p className="section-label">START WITH A QUERY</p>
             <h2 id="query-title">查詢 Google 第一頁</h2>
             <p>{isPublicTest
-              ? '公開測試僅允許「4G 吃到飽」，不要求登入，也不保存分析歷史。'
+              ? (allowAnyQuery
+                ? '公開測試可輸入任意關鍵字，不要求登入，也不保存分析歷史。'
+                : '公開測試僅允許「4G 吃到飽」，不要求登入，也不保存分析歷史。')
               : '可輸入任意關鍵字；Live 模式會從伺服器端呼叫 SerpApi，避免把金鑰送到瀏覽器。'}</p>
           </div>
           <form className="query-form" onSubmit={runAnalysis}>
@@ -347,7 +351,7 @@ function Dashboard({ session, isDemo, isPublicTest, onDemoLogout }) {
               onChange={(event) => setQuery(event.target.value)}
               placeholder="例如：4G 吃到飽"
               maxLength="200"
-              readOnly={isPublicTest}
+              readOnly={publicQueryLocked}
             />
             <button className="button primary" type="submit" disabled={busy}>
               {busy ? '分析中…' : '開始分析'}
@@ -356,11 +360,13 @@ function Dashboard({ session, isDemo, isPublicTest, onDemoLogout }) {
           <div className="query-meta">
             <span>地區：台灣（gl=tw）</span>
             <span>語言：繁體中文（hl=zh-tw）</span>
-            <span>{isPublicTest ? '公開測試：固定查詢、不保存' : '範圍：organic results 前 10 筆'}</span>
+            <span>{isPublicTest
+              ? (allowAnyQuery ? '公開測試：任意查詢、不保存' : '公開測試：固定查詢、不保存')
+              : '範圍：organic results 前 10 筆'}</span>
           </div>
         </section>
 
-        {isPublicTest && <div className="alert info" role="status">公開測試模式：只允許「4G 吃到飽」，每次分析結果不會寫入 Supabase。</div>}
+        {isPublicTest && <div className="alert info" role="status">公開測試模式：{allowAnyQuery ? '可查任意關鍵字' : '只允許「4G 吃到飽」'}，每次分析結果不會寫入 Supabase。</div>}
         {error && <div className="alert error" role="alert">{error}</div>}
         {notice && <div className="alert info" role="status">{notice}</div>}
         {result ? <ResultView result={result} /> : <EmptyState onRun={runAnalysis} />}

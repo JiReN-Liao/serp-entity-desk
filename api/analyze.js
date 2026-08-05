@@ -42,6 +42,10 @@ function publicClientKey(req) {
   return String(forwarded).split(',')[0].trim().slice(0, 128) || 'unknown'
 }
 
+function isPublicTestQueryAllowed(query, expectedQuery, allowAnyQuery) {
+  return allowAnyQuery || query === expectedQuery
+}
+
 function setCors(req, res) {
   const origin = getHeader(req, 'origin')
   const allowedOrigins = env('APP_ORIGIN')
@@ -378,6 +382,7 @@ export default async function handler(req, res) {
   const scriptToken = getHeader(req, 'x-app-script-token')
   const isScriptRequest = Boolean(env('APP_SCRIPT_TOKEN') && scriptToken && scriptToken === env('APP_SCRIPT_TOKEN'))
   const publicTestMode = env('PUBLIC_TEST_MODE') === 'true'
+  const publicTestAllowAnyQuery = env('PUBLIC_TEST_ALLOW_ANY_QUERY') === 'true'
   const publicTestQuery = normalizeText(env('PUBLIC_TEST_QUERY', DEFAULT_PUBLIC_TEST_QUERY)) || DEFAULT_PUBLIC_TEST_QUERY
   const cooldownValue = Number(env('PUBLIC_TEST_COOLDOWN_MS', String(DEFAULT_PUBLIC_TEST_COOLDOWN_MS)))
   const publicTestCooldownMs = Number.isFinite(cooldownValue) && cooldownValue >= 0
@@ -385,7 +390,7 @@ export default async function handler(req, res) {
     : DEFAULT_PUBLIC_TEST_COOLDOWN_MS
   let user = null
   if (!isScriptRequest && publicTestMode) {
-    if (query !== publicTestQuery) {
+    if (!isPublicTestQueryAllowed(query, publicTestQuery, publicTestAllowAnyQuery)) {
       return json(res, 403, { error: `公開測試模式只允許查詢「${publicTestQuery}」。` })
     }
     const key = publicClientKey(req)
@@ -418,4 +423,4 @@ export default async function handler(req, res) {
   }
 }
 
-export { extractEntities, isPrivateIp, isSafePublicUrl }
+export { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed }
