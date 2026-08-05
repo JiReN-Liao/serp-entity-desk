@@ -6,6 +6,9 @@ import { isIP } from 'node:net'
 const MAX_ARTICLES = 10
 const MAX_QUERY_LENGTH = 200
 const DEFAULT_TIMEOUT_MS = 9000
+const DEFAULT_PUBLIC_TEST_QUERY = '4G 吃到飽'
+const DEFAULT_PUBLIC_TEST_COOLDOWN_MS = 30000
+const publicTestRuns = new Map()
 
 const STOPWORDS = new Set([
   '可以', '以及', '這個', '這些', '我們', '你們', '他們', '如何', '什麼', '為什麼', '如果', '因此',
@@ -32,6 +35,11 @@ function env(name, fallback = '') {
 function getHeader(req, name) {
   const value = req.headers?.[name.toLowerCase()]
   return Array.isArray(value) ? value[0] : value
+}
+
+function publicClientKey(req) {
+  const forwarded = getHeader(req, 'x-forwarded-for') || getHeader(req, 'x-real-ip') || 'unknown'
+  return String(forwarded).split(',')[0].trim().slice(0, 128) || 'unknown'
 }
 
 function setCors(req, res) {
@@ -369,8 +377,27 @@ export default async function handler(req, res) {
 
   const scriptToken = getHeader(req, 'x-app-script-token')
   const isScriptRequest = Boolean(env('APP_SCRIPT_TOKEN') && scriptToken && scriptToken === env('APP_SCRIPT_TOKEN'))
+  const publicTestMode = env('PUBLIC_TEST_MODE') === 'true'
+  const publicTestQuery = normalizeText(env('PUBLIC_TEST_QUERY', DEFAULT_PUBLIC_TEST_QUERY)) || DEFAULT_PUBLIC_TEST_QUERY
+  const cooldownValue = Number(env('PUBLIC_TEST_COOLDOWN_MS', String(DEFAULT_PUBLIC_TEST_COOLDOWN_MS)))
+  const publicTestCooldownMs = Number.isFinite(cooldownValue) && cooldownValue >= 0
+    ? cooldownValue
+    : DEFAULT_PUBLIC_TEST_COOLDOWN_MS
   let user = null
-  if (!isScriptRequest) {
+  if (!isScriptRequest && publicTestMode) {
+    if (query !== publicTestQuery) {
+      return json(res, 403, { error: `公開測試模式只允許查詢「${publicTestQuery}」。` })
+    }
+    const key = publicClientKey(req)
+    const now = Date.now()
+    const lastRun = publicTestRuns.get(key) || 0
+    const remainingMs = publicTestCooldownMs - (now - lastRun)
+    if (remainingMs > 0) {
+      res.setHeader('Retry-After', String(Math.ceil(remainingMs / 1000)))
+      return json(res, 429, { error: '公開測試冷卻中，請稍後再試。' })
+    }
+    publicTestRuns.set(key, now)
+  } else if (!isScriptRequest) {
     try {
       user = await verifyUser(getHeader(req, 'authorization'))
     } catch (error) {
@@ -381,7 +408,7 @@ export default async function handler(req, res) {
 
   try {
     const result = await analyze(query, body.gl || 'tw', body.hl || 'zh-tw')
-    const persistence = body.persist === false || isScriptRequest
+    const persistence = body.persist === false || isScriptRequest || publicTestMode
       ? { persisted: false }
       : await persistResult(result, user.id)
     return json(res, 200, { result: { ...result, persistence } })

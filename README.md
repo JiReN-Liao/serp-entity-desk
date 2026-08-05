@@ -6,6 +6,7 @@
 
 - 已實作：自由輸入查詢、前 10 筆結果、逐篇 entity 候選、分群、圖表、登入 UI、最近分析歷史、Supabase schema、Vercel API route、Apps Script 匯出範例。
 - 展示模式：沒有外部金鑰時可用一組明確標示為「展示資料」的固定資料檢查 UI；它不冒充即時 SERP。
+- 公開測試模式（暫時）：可在不登入的情況下測試固定查詢 `4G 吃到飽`；不保存 Supabase 歷史，並以每個來源 IP 的 best-effort 冷卻時間降低免費 API 被重複消耗的風險。這只適合短時間 Demo，驗證完成後應關閉。
 - Live 模式：需要 SerpApi、Supabase 與 Vercel 設定；未填金鑰前不宣稱已部署或已連線。
 - entity 抽取目前是可解釋的規則式候選抽取，不等同完整命名實體辨識（NER）。後續若需要語意級精度，再替換 `api/analyze.js` 的 extractor，不改 UI 與資料格式。
 
@@ -42,6 +43,8 @@ npx vercel dev
 3. 在 Vercel Project Settings 填入 `.env.example` 中的環境變數；`SUPABASE_SERVICE_ROLE_KEY`、`SERPAPI_KEY`、`APP_SCRIPT_TOKEN` 只能作為 server-side variable。
 4. 重新部署後，先註冊測試帳號，再用 `4G 吃到飽` 與另一個詞各跑一次，保留結果截圖與 Supabase row 作為驗收證據。
 5. 將部署後的 `/api/analyze` URL 與 `APP_SCRIPT_TOKEN` 以 Script Properties 設定給 Apps Script，避免把 token 寫進試算表或程式碼。
+
+若只是短時間公開展示，可暫時將前端 `VITE_PUBLIC_TEST_MODE=true` 與 server-side `PUBLIC_TEST_MODE=true`，並保留 `PUBLIC_TEST_QUERY=4G 吃到飽`。公開測試不需要帳號，但不提供任意關鍵字、不保存歷史，而且 serverless 記憶體內冷卻不是完整的防濫用方案；測試後要改回 `false` 並重新部署。
 
 `APP_ORIGIN` 可填入正式前端網址（多個來源以逗號分隔），API 只會對列出的來源回傳 CORS header；同源 Vercel 前端不需要額外設定。文章抓取也會拒絕 localhost、私有 IP、metadata host、非 80／443 port 與含帳密 URL，降低 SSRF 風險。
 

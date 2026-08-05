@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { demoAllowed, supabase } from './supabaseClient.js'
+import { demoAllowed, publicTestAllowed, supabase } from './supabaseClient.js'
 import { getDemoResult } from './demoData.js'
 
 const defaultQuery = '4G 吃到飽'
@@ -49,7 +49,7 @@ function App() {
   }, [])
 
   if (!authReady) return <LoadingScreen />
-  if (!session && !isDemo) {
+  if (!session && !isDemo && !publicTestAllowed) {
     return <AuthScreen onDemo={() => setIsDemo(true)} />
   }
 
@@ -57,6 +57,7 @@ function App() {
     <Dashboard
       session={session}
       isDemo={isDemo}
+      isPublicTest={publicTestAllowed}
       onDemoLogout={() => setIsDemo(false)}
     />
   )
@@ -188,17 +189,17 @@ function AuthScreen({ onDemo }) {
   )
 }
 
-function Dashboard({ session, isDemo, onDemoLogout }) {
+function Dashboard({ session, isDemo, isPublicTest, onDemoLogout }) {
   const [query, setQuery] = useState(defaultQuery)
   const [result, setResult] = useState(isDemo ? getDemoResult(defaultQuery) : null)
   const [history, setHistory] = useState([])
-  const [historyBusy, setHistoryBusy] = useState(!isDemo && Boolean(session))
+  const [historyBusy, setHistoryBusy] = useState(!isDemo && !isPublicTest && Boolean(session))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
   async function refreshHistory() {
-    if (isDemo || !session?.access_token) return
+    if (isDemo || isPublicTest || !session?.access_token) return
     setHistoryBusy(true)
     try {
       const response = await fetch('/api/history', {
@@ -215,11 +216,11 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
 
   useEffect(() => {
     refreshHistory()
-  }, [isDemo, session?.access_token])
+  }, [isDemo, isPublicTest, session?.access_token])
 
   async function runAnalysis(event) {
     event?.preventDefault()
-    const nextQuery = query.trim()
+    const nextQuery = isPublicTest ? defaultQuery : query.trim()
     if (nextQuery.length < 2) {
       setError('請輸入至少 2 個字元的查詢詞。')
       return
@@ -232,19 +233,20 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
         setResult(getDemoResult(nextQuery))
         setNotice('展示資料已更新查詢標籤；接上 SerpApi 後才會取得即時結果。')
       } else {
+        const headers = { 'Content-Type': 'application/json' }
+        if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
         const response = await fetch('/api/analyze', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ query: nextQuery, gl: 'tw', hl: 'zh-tw' }),
+          headers,
+          body: JSON.stringify({ query: nextQuery, gl: 'tw', hl: 'zh-tw', persist: !isPublicTest }),
         })
         const body = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(body.error || `分析失敗（${response.status}）`)
         setResult(body.result || body)
         await refreshHistory()
-        setNotice('分析完成；若已設定 Supabase，結果也會保存到 analysis_runs。')
+        setNotice(isPublicTest
+          ? '公開測試完成；本次結果不會保存到 Supabase 歷史。'
+          : '分析完成；若已設定 Supabase，結果也會保存到 analysis_runs。')
       }
     } catch (runError) {
       setError(runError.message || '分析失敗，請稍後再試。')
@@ -256,6 +258,10 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
   async function logout() {
     if (isDemo) {
       onDemoLogout()
+      return
+    }
+    if (isPublicTest) {
+      window.location.reload()
       return
     }
     await supabase?.auth.signOut()
@@ -275,8 +281,8 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
         </div>
         <div className="history-block" aria-label="最近分析">
           <span className="sidebar-caption">RECENT ANALYSIS</span>
-          {isDemo ? (
-            <p className="history-empty">展示模式不保存歷史。</p>
+          {isDemo || isPublicTest ? (
+            <p className="history-empty">{isDemo ? '展示模式不保存歷史。' : '公開測試不保存歷史。'}</p>
           ) : historyBusy ? (
             <p className="history-empty">讀取歷史…</p>
           ) : history.length ? (
@@ -303,13 +309,13 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
         </div>
         <div className="sidebar-bottom">
           <div className="source-status">
-            <span className={isDemo ? 'status-dot demo' : 'status-dot'} />
+            <span className={isDemo || isPublicTest ? 'status-dot demo' : 'status-dot'} />
             <div>
-              <strong>{isDemo ? '展示模式' : 'Live workspace'}</strong>
-              <span>{isDemo ? '固定資料' : 'Supabase session'}</span>
+              <strong>{isDemo ? '展示模式' : isPublicTest ? '公開測試模式' : 'Live workspace'}</strong>
+              <span>{isDemo ? '固定資料' : isPublicTest ? '固定 query / 不保存' : 'Supabase session'}</span>
             </div>
           </div>
-          <button className="sidebar-logout" type="button" onClick={logout}>登出</button>
+          <button className="sidebar-logout" type="button" onClick={logout}>{isPublicTest ? '重新整理' : '登出'}</button>
         </div>
       </aside>
 
@@ -320,7 +326,7 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
             <h1>SERP Entity Desk</h1>
           </div>
           <div className="topbar-meta">
-            <span className="quiet-tag">{isDemo ? 'DEMO DATA' : 'AUTHENTICATED'}</span>
+            <span className="quiet-tag">{isDemo ? 'DEMO DATA' : isPublicTest ? 'PUBLIC TEST' : 'AUTHENTICATED'}</span>
             <span className="last-run">{result ? `更新於 ${formatDate(result.createdAt)}` : '尚未執行分析'}</span>
           </div>
         </header>
@@ -329,7 +335,9 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
           <div className="query-copy">
             <p className="section-label">START WITH A QUERY</p>
             <h2 id="query-title">查詢 Google 第一頁</h2>
-            <p>可輸入任意關鍵字；Live 模式會從伺服器端呼叫 SerpApi，避免把金鑰送到瀏覽器。</p>
+            <p>{isPublicTest
+              ? '公開測試僅允許「4G 吃到飽」，不要求登入，也不保存分析歷史。'
+              : '可輸入任意關鍵字；Live 模式會從伺服器端呼叫 SerpApi，避免把金鑰送到瀏覽器。'}</p>
           </div>
           <form className="query-form" onSubmit={runAnalysis}>
             <label className="sr-only" htmlFor="query">搜尋關鍵字</label>
@@ -339,6 +347,7 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
               onChange={(event) => setQuery(event.target.value)}
               placeholder="例如：4G 吃到飽"
               maxLength="200"
+              readOnly={isPublicTest}
             />
             <button className="button primary" type="submit" disabled={busy}>
               {busy ? '分析中…' : '開始分析'}
@@ -347,10 +356,11 @@ function Dashboard({ session, isDemo, onDemoLogout }) {
           <div className="query-meta">
             <span>地區：台灣（gl=tw）</span>
             <span>語言：繁體中文（hl=zh-tw）</span>
-            <span>範圍：organic results 前 10 筆</span>
+            <span>{isPublicTest ? '公開測試：固定查詢、不保存' : '範圍：organic results 前 10 筆'}</span>
           </div>
         </section>
 
+        {isPublicTest && <div className="alert info" role="status">公開測試模式：只允許「4G 吃到飽」，每次分析結果不會寫入 Supabase。</div>}
         {error && <div className="alert error" role="alert">{error}</div>}
         {notice && <div className="alert info" role="status">{notice}</div>}
         {result ? <ResultView result={result} /> : <EmptyState onRun={runAnalysis} />}

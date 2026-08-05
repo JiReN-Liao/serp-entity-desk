@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { extractEntities, isPrivateIp, isSafePublicUrl } from '../api/analyze.js'
+import analyzeHandler, { extractEntities, isPrivateIp, isSafePublicUrl } from '../api/analyze.js'
 import historyHandler from '../api/history.js'
 
 function mockResponse(resolve) {
@@ -58,4 +58,24 @@ test('history route rejects unauthenticated requests', async () => {
     mockResponse(resolve),
   ))
   assert.equal(response.status, 401)
+})
+
+test('public test mode rejects queries outside its fixed test query', async () => {
+  const previousMode = process.env.PUBLIC_TEST_MODE
+  const previousQuery = process.env.PUBLIC_TEST_QUERY
+  try {
+    process.env.PUBLIC_TEST_MODE = 'true'
+    process.env.PUBLIC_TEST_QUERY = '4G 吃到飽'
+    const response = await new Promise((resolve) => analyzeHandler(
+      { method: 'POST', headers: {}, body: { query: '另一個查詢' } },
+      mockResponse(resolve),
+    ))
+    assert.equal(response.status, 403)
+    assert.match(response.body.error, /只允許查詢/)
+  } finally {
+    if (previousMode === undefined) delete process.env.PUBLIC_TEST_MODE
+    else process.env.PUBLIC_TEST_MODE = previousMode
+    if (previousQuery === undefined) delete process.env.PUBLIC_TEST_QUERY
+    else process.env.PUBLIC_TEST_QUERY = previousQuery
+  }
 })
