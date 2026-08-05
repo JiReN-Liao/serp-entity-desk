@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { extractEntities, isPrivateIp, isSafePublicUrl } from './analyze.js'
-import historyHandler from './history.js'
+import { extractEntities, isPrivateIp, isSafePublicUrl } from '../api/analyze.js'
+import historyHandler from '../api/history.js'
 
 function mockResponse(resolve) {
   return {
