@@ -19,6 +19,7 @@
    - Vercel server：`SUPABASE_URL`、`SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`。
    - 在 SQL Editor 執行 `supabase/schema.sql`。
    - Auth 開啟 Email／Password；若開啟 email confirmation，註冊後要先收信確認。
+   - 在 Authentication → URL Configuration 將 Site URL 設為 `https://serp-entity-desk.vercel.app`，Redirect URLs 至少加入同一個網址，讓註冊驗證與忘記密碼連結能回到正式站。
 4. Apps Script（可選）：在 Script Properties 設定 `SERP_ENTITY_ENDPOINT` 與 `SERP_ENTITY_API_TOKEN`，再執行 `apps-script/Code.gs` 的 `setupSheet`。
 
 ## 本機執行
@@ -41,10 +42,12 @@ npx vercel dev
 1. 建立 Supabase 專案，執行 `supabase/schema.sql`，設定 Email／Password Auth。
 2. 在 Vercel Import Project 指向本資料夾，或在本機執行 `vercel`。
 3. 在 Vercel Project Settings 填入 `.env.example` 中的環境變數；`SUPABASE_SERVICE_ROLE_KEY`、`SERPAPI_KEY`、`APP_SCRIPT_TOKEN` 只能作為 server-side variable。
-4. 重新部署後，先註冊測試帳號，再用 `4G 吃到飽` 與另一個詞各跑一次，保留結果截圖與 Supabase row 作為驗收證據。
+4. 重新部署後，先註冊測試帳號；若有 email confirmation，先完成信箱驗證，再登入。登入後用 `4G 吃到飽` 與另一個詞各跑一次，確認側欄可看到自己的歷史分析。
 5. 將部署後的 `/api/analyze` URL 與 `APP_SCRIPT_TOKEN` 以 Script Properties 設定給 Apps Script，避免把 token 寫進試算表或程式碼。
 
 若只是短時間公開展示，可暫時將前端 `VITE_PUBLIC_TEST_MODE=true`、`VITE_PUBLIC_TEST_ALLOW_ANY_QUERY=true` 與 server-side `PUBLIC_TEST_MODE=true`、`PUBLIC_TEST_ALLOW_ANY_QUERY=true`。公開測試不需要帳號、不保存歷史，但會消耗 SerpApi 額度，而且 serverless 記憶體內冷卻不是完整的防濫用方案；測試後要改回 `false` 並重新部署。
+
+正式登入模式應將 `VITE_PUBLIC_TEST_MODE=false`、`PUBLIC_TEST_MODE=false`、`VITE_DEMO_MODE=false`。登入頁支援 Email／密碼登入、建立帳號、忘記密碼、重設密碼、email confirmation 提示、密碼確認與顯示／隱藏密碼；分析 API 與歷史 API 都會在 server 端驗證 Supabase access token。
 
 `APP_ORIGIN` 可填入正式前端網址（多個來源以逗號分隔），API 只會對列出的來源回傳 CORS header；同源 Vercel 前端不需要額外設定。文章抓取也會拒絕 localhost、私有 IP、metadata host、非 80／443 port 與含帳密 URL，降低 SSRF 風險。
 

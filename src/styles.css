@@ -55,6 +55,10 @@ a { color: inherit; }
 input { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 12px 13px; background: var(--surface); color: var(--ink); outline: none; transition: border-color 180ms ease, box-shadow 180ms ease; }
 input::placeholder { color: var(--muted); }
 input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px oklch(0.53 0.14 230 / 0.16); }
+.password-field { position: relative; display: block; }
+.password-field input { padding-right: 68px; }
+.password-toggle { position: absolute; top: 50%; right: 9px; transform: translateY(-50%); border: 0; padding: 4px; background: none; color: var(--primary-strong); font-size: 11px; font-weight: 800; }
+.password-toggle:hover { text-decoration: underline; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; border: 1px solid transparent; border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 800; white-space: nowrap; transition: transform 180ms ease, background 180ms ease, border-color 180ms ease; }
 .button:hover:not(:disabled) { transform: translateY(-1px); }
 .button:active:not(:disabled) { transform: translateY(0); }
@@ -68,6 +72,7 @@ input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px oklch(0.53 0.1
 .auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .text-button { display: block; margin: 20px auto 0; border: 0; background: none; color: var(--primary-strong); font-size: 12px; font-weight: 750; }
 .text-button:hover { text-decoration: underline; }
+.auth-forgot { justify-self: start; margin: -8px 0 0; padding: 0; font-size: 11px; }
 .form-message, .config-hint { margin: 0; font-size: 12px; line-height: 1.5; }
 .form-message.error, .alert.error { color: var(--danger); }
 .form-message.success { color: var(--success); }
@@ -94,6 +99,7 @@ input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px oklch(0.53 0.1
 .source-status { display: flex; align-items: flex-start; gap: 10px; padding-top: 18px; border-top: 1px solid oklch(0.75 0.07 230 / 0.35); }
 .source-status div { display: grid; gap: 4px; font-size: 12px; }
 .source-status div span { color: oklch(0.79 0.04 230); font-size: 11px; }
+.source-status .session-email { max-width: 175px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-logout { width: fit-content; min-height: 44px; border: 0; padding: 0; background: none; color: oklch(0.86 0.06 230); font-size: 12px; font-weight: 750; }
 .sidebar-logout:hover { color: white; text-decoration: underline; }
 .main-content { min-width: 0; padding: 42px clamp(22px, 5vw, 76px) 70px; }
@@ -178,7 +184,7 @@ td { padding: 14px 12px; border-top: 1px solid var(--line); vertical-align: top;
 .result-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; padding: 0 3px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 
 .button:focus-visible, .text-button:focus-visible, .sidebar-logout:focus-visible,
-.history-item:focus-visible, .article-cell a:focus-visible {
+.history-item:focus-visible, .article-cell a:focus-visible, .password-toggle:focus-visible {
   outline: 3px solid oklch(0.72 0.14 73 / 0.9);
   outline-offset: 3px;
 }

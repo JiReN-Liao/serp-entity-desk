@@ -4,6 +4,20 @@ import { getDemoResult } from './demoData.js'
 
 const defaultQuery = '4G 吃到飽'
 
+function getAuthRedirectUrl() {
+  return window.location.origin
+}
+
+function authErrorMessage(error, fallback = '驗證失敗，請稍後再試。') {
+  const message = String(error?.message || '')
+  if (/invalid login credentials/i.test(message)) return 'Email 或密碼不正確。'
+  if (/email not confirmed/i.test(message)) return '這個 Email 尚未完成驗證，請先查看信箱。'
+  if (/user already registered/i.test(message)) return '這個 Email 已註冊，請直接登入或使用忘記密碼。'
+  if (/password should be at least/i.test(message)) return '密碼長度不足，請使用至少 6 個字元。'
+  if (/rate limit|too many requests/i.test(message)) return '操作太頻繁，請稍後再試。'
+  return message || fallback
+}
+
 function formatDate(value) {
   if (!value) return '—'
   const date = new Date(value)
@@ -25,6 +39,7 @@ function domainFromUrl(value) {
 function App() {
   const [session, setSession] = useState(null)
   const [isDemo, setIsDemo] = useState(false)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
   const [authReady, setAuthReady] = useState(!supabase)
 
   useEffect(() => {
@@ -38,8 +53,10 @@ function App() {
     }).catch(() => {
       if (active) setAuthReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
+      if (event === 'SIGNED_OUT') setPasswordRecovery(false)
       setAuthReady(true)
     })
     return () => {
@@ -49,6 +66,9 @@ function App() {
   }, [])
 
   if (!authReady) return <LoadingScreen />
+  if (passwordRecovery && session) {
+    return <PasswordRecoveryScreen onComplete={() => setPasswordRecovery(false)} />
+  }
   if (!session && !isDemo && !publicTestAllowed) {
     return <AuthScreen onDemo={() => setIsDemo(true)} />
   }
@@ -77,9 +97,16 @@ function AuthScreen({ onDemo }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  const isLogin = mode === 'login'
+  const isSignup = mode === 'signup'
+  const isRecovery = mode === 'recovery'
+  const title = isLogin ? '登入工作台' : isSignup ? '建立測試帳號' : '重設密碼'
 
   async function submit(event) {
     event.preventDefault()
@@ -89,20 +116,64 @@ function AuthScreen({ onDemo }) {
       setError('尚未設定 Supabase；目前請使用展示模式，或先填入 .env.local。')
       return
     }
-    setBusy(true)
-    const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password })
-    setBusy(false)
-    if (result.error) {
-      setError(result.error.message)
+    const cleanEmail = email.trim().toLowerCase()
+    if (!cleanEmail) {
+      setError('請輸入 Email。')
       return
     }
-    if (mode === 'signup' && !result.data.session) {
-      setMessage('註冊完成。若 Supabase 開啟 email confirmation，請先收信確認，再回到登入。')
-    } else {
-      setMessage('登入成功，正在載入分析工作台。')
+    if (isSignup && password !== confirmPassword) {
+      setError('兩次輸入的密碼不一致。')
+      return
     }
+
+    setBusy(true)
+    try {
+      if (isRecovery) {
+        const result = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: getAuthRedirectUrl(),
+        })
+        if (result.error) {
+          setError(authErrorMessage(result.error, '無法寄送重設信件。'))
+          return
+        }
+        setMode('login')
+        setMessage('如果此 Email 有對應帳號，重設密碼連結會寄到你的信箱。')
+        return
+      }
+
+      const result = isLogin
+        ? await supabase.auth.signInWithPassword({ email: cleanEmail, password })
+        : await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: { emailRedirectTo: getAuthRedirectUrl() },
+        })
+      if (result.error) {
+        setError(authErrorMessage(result.error, isLogin ? '登入失敗。' : '註冊失敗。'))
+        return
+      }
+      if (isSignup && !result.data?.session) {
+        setMode('login')
+        setPassword('')
+        setConfirmPassword('')
+        setMessage('註冊完成。請先查看信箱完成驗證，再回到這裡登入。')
+      } else {
+        setMessage('登入成功，正在載入分析工作台。')
+      }
+    } catch (submitError) {
+      setError(authErrorMessage(submitError, isRecovery ? '無法寄送重設信件。' : '驗證失敗。'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function switchMode(nextMode) {
+    setMode(nextMode)
+    setError('')
+    setMessage('')
+    setPassword('')
+    setConfirmPassword('')
+    setPasswordVisible(false)
   }
 
   return (
@@ -130,61 +201,198 @@ function AuthScreen({ onDemo }) {
         <div className="panel-heading">
           <div>
             <p className="section-label">WORKSPACE ACCESS</p>
-            <h2 id="auth-title">{mode === 'login' ? '登入工作台' : '建立測試帳號'}</h2>
+            <h2 id="auth-title">{title}</h2>
           </div>
           <span className="quiet-tag">Supabase Auth</span>
         </div>
         <form className="auth-form" onSubmit={submit}>
-          <label>
+          <label htmlFor="auth-email">
             Email
             <input
+              id="auth-email"
               type="email"
               autoComplete="email"
+              autoFocus
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@example.com"
               required
             />
           </label>
-          <label>
-            密碼
+          {!isRecovery && (
+            <label htmlFor="auth-password">
+              密碼
+              <span className="password-field">
+                <input
+                  id="auth-password"
+                  type={passwordVisible ? 'text' : 'password'}
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="至少 6 個字元"
+                  minLength="6"
+                  required
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setPasswordVisible((visible) => !visible)}
+                  aria-label={passwordVisible ? '隱藏密碼' : '顯示密碼'}
+                  aria-pressed={passwordVisible}
+                >
+                  {passwordVisible ? '隱藏' : '顯示'}
+                </button>
+              </span>
+            </label>
+          )}
+          {isSignup && (
+            <label htmlFor="auth-confirm-password">
+              確認密碼
+              <input
+                id="auth-confirm-password"
+                type={passwordVisible ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                placeholder="再次輸入密碼"
+                minLength="6"
+                required
+              />
+            </label>
+          )}
+          {isLogin && (
+            <button className="text-button auth-forgot" type="button" onClick={() => switchMode('recovery')}>
+              忘記密碼？寄送重設連結
+            </button>
+          )}
+          {error && <p className="form-message error" role="alert">{error}</p>}
+          {message && <p className="form-message success" role="status">{message}</p>}
+          <button className="button primary full-width" type="submit" disabled={busy || !supabase}>
+            {busy ? '處理中…' : isLogin ? '登入並開始分析' : isSignup ? '註冊測試帳號' : '寄送重設連結'}
+          </button>
+        </form>
+
+        {isRecovery ? (
+          <button className="text-button" type="button" onClick={() => switchMode('login')}>
+            返回登入
+          </button>
+        ) : (
+          <>
+            <div className="auth-divider"><span>或</span></div>
+            {demoAllowed ? (
+              <button className="button secondary full-width" type="button" onClick={onDemo}>
+                進入展示模式
+                <span className="button-note">使用固定範例資料，不呼叫外部 API</span>
+              </button>
+            ) : (
+              <p className="config-hint">展示模式已關閉；請使用 Supabase 帳號登入。</p>
+            )}
+            <button className="text-button" type="button" onClick={() => switchMode(isLogin ? 'signup' : 'login')}>
+              {isLogin ? '還沒有帳號？建立測試帳號' : '已有帳號？返回登入'}
+            </button>
+          </>
+        )}
+      </section>
+    </main>
+  )
+}
+
+function PasswordRecoveryScreen({ onComplete }) {
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event) {
+    event.preventDefault()
+    setError('')
+    if (password !== confirmPassword) {
+      setError('兩次輸入的密碼不一致。')
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await supabase.auth.updateUser({ password })
+      if (result.error) {
+        setError(authErrorMessage(result.error, '無法更新密碼。'))
+        return
+      }
+      window.history.replaceState({}, document.title, window.location.pathname)
+      onComplete()
+    } catch (updateError) {
+      setError(authErrorMessage(updateError, '無法更新密碼。'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-intro">
+        <div className="brand-lockup">
+          <span className="brand-mark">SE</span>
+          <span>SERP Entity Desk</span>
+        </div>
+        <div className="intro-copy">
+          <p className="kicker">ACCOUNT RECOVERY</p>
+          <h1>設定新的工作台密碼。</h1>
+          <p>更新完成後，原本的登入工作階段會繼續使用。</p>
+        </div>
+        <div className="intro-note"><span className="status-dot" /><span>密碼只交給 Supabase Auth 處理。</span></div>
+      </section>
+      <section className="auth-panel" aria-labelledby="recovery-title">
+        <div className="panel-heading">
+          <div>
+            <p className="section-label">ACCOUNT RECOVERY</p>
+            <h2 id="recovery-title">設定新密碼</h2>
+          </div>
+          <span className="quiet-tag">Supabase Auth</span>
+        </div>
+        <form className="auth-form" onSubmit={submit}>
+          <label htmlFor="recovery-password">
+            新密碼
+            <span className="password-field">
+              <input
+                id="recovery-password"
+                type={passwordVisible ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="至少 6 個字元"
+                minLength="6"
+                required
+                autoFocus
+              />
+              <button
+                className="password-toggle"
+                type="button"
+                onClick={() => setPasswordVisible((visible) => !visible)}
+                aria-label={passwordVisible ? '隱藏密碼' : '顯示密碼'}
+                aria-pressed={passwordVisible}
+              >
+                {passwordVisible ? '隱藏' : '顯示'}
+              </button>
+            </span>
+          </label>
+          <label htmlFor="recovery-confirm-password">
+            確認新密碼
             <input
-              type="password"
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="至少 6 個字元"
+              id="recovery-confirm-password"
+              type={passwordVisible ? 'text' : 'password'}
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="再次輸入新密碼"
               minLength="6"
               required
             />
           </label>
           {error && <p className="form-message error" role="alert">{error}</p>}
-          {message && <p className="form-message success" role="status">{message}</p>}
           <button className="button primary full-width" type="submit" disabled={busy || !supabase}>
-            {busy ? '處理中…' : mode === 'login' ? '登入並開始分析' : '註冊測試帳號'}
+            {busy ? '更新中…' : '更新密碼'}
           </button>
         </form>
-
-        <div className="auth-divider"><span>或</span></div>
-        {demoAllowed ? (
-          <button className="button secondary full-width" type="button" onClick={onDemo}>
-            進入展示模式
-            <span className="button-note">使用固定範例資料，不呼叫外部 API</span>
-          </button>
-        ) : (
-          <p className="config-hint">展示模式已關閉；請填入 Supabase 環境變數後登入。</p>
-        )}
-        <button
-          className="text-button"
-          type="button"
-          onClick={() => {
-            setMode(mode === 'login' ? 'signup' : 'login')
-            setError('')
-            setMessage('')
-          }}
-        >
-          {mode === 'login' ? '還沒有帳號？建立測試帳號' : '已有帳號？返回登入'}
-        </button>
       </section>
     </main>
   )
@@ -195,6 +403,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
   const [query, setQuery] = useState(defaultQuery)
   const [result, setResult] = useState(isDemo ? getDemoResult(defaultQuery) : null)
   const [history, setHistory] = useState([])
+  const [historyError, setHistoryError] = useState('')
   const [historyBusy, setHistoryBusy] = useState(!isDemo && !isPublicTest && Boolean(session))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -208,9 +417,14 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
       const body = await response.json().catch(() => ({}))
-      if (response.ok) setHistory(body.history || [])
+      if (response.ok) {
+        setHistory(body.history || [])
+        setHistoryError('')
+      } else {
+        setHistoryError(body.error || '無法讀取歷史分析。')
+      }
     } catch {
-      // History is supplementary; a failed history request must not block analysis.
+      setHistoryError('無法連線到歷史分析；仍可繼續執行新查詢。')
     } finally {
       setHistoryBusy(false)
     }
@@ -244,11 +458,14 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
         })
         const body = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(body.error || `分析失敗（${response.status}）`)
-        setResult(body.result || body)
+        const nextResult = body.result || body
+        setResult(nextResult)
         await refreshHistory()
         setNotice(isPublicTest
           ? '公開測試完成；本次結果不會保存到 Supabase 歷史。'
-          : '分析完成；若已設定 Supabase，結果也會保存到 analysis_runs。')
+          : nextResult.persistence?.persisted
+            ? '分析完成，結果已保存到你的歷史分析。'
+            : nextResult.persistence?.persistenceError || '分析完成，但歷史尚未保存；請確認 Supabase schema。')
       }
     } catch (runError) {
       setError(runError.message || '分析失敗，請稍後再試。')
@@ -287,6 +504,8 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
             <p className="history-empty">{isDemo ? '展示模式不保存歷史。' : '公開測試不保存歷史。'}</p>
           ) : historyBusy ? (
             <p className="history-empty">讀取歷史…</p>
+          ) : historyError ? (
+            <p className="history-empty">{historyError}</p>
           ) : history.length ? (
             <div className="history-list">
               {history.map((item) => (
@@ -315,6 +534,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
             <div>
               <strong>{isDemo ? '展示模式' : isPublicTest ? '公開測試模式' : 'Live workspace'}</strong>
               <span>{isDemo ? '固定資料' : isPublicTest ? (allowAnyQuery ? '任意 query / 不保存' : '固定 query / 不保存') : 'Supabase session'}</span>
+              {!isDemo && !isPublicTest && session?.user?.email && <span className="session-email">{session.user.email}</span>}
             </div>
           </div>
           <button className="sidebar-logout" type="button" onClick={logout}>{isPublicTest ? '重新整理' : '登出'}</button>
