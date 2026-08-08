@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { demoAllowed, publicTestAllowed, publicTestAllowAnyQuery, supabase } from './supabaseClient.js'
 import { getDemoResult } from './demoData.js'
+import { displayAccount, resolveLoginEmail } from './authIdentifier.js'
 
 const defaultQuery = '4G 吃到飽'
 
@@ -10,7 +11,7 @@ function getAuthRedirectUrl() {
 
 function authErrorMessage(error, fallback = '驗證失敗，請稍後再試。') {
   const message = String(error?.message || '')
-  if (/invalid login credentials/i.test(message)) return 'Email 或密碼不正確。'
+  if (/invalid login credentials/i.test(message)) return '帳號或密碼不正確。'
   if (/email not confirmed/i.test(message)) return '這個 Email 尚未完成驗證，請先查看信箱。'
   if (/user already registered/i.test(message)) return '這個 Email 已註冊，請直接登入或使用忘記密碼。'
   if (/password should be at least/i.test(message)) return '密碼長度不足，請使用至少 6 個字元。'
@@ -116,11 +117,16 @@ function AuthScreen({ onDemo }) {
       setError('尚未設定 Supabase；目前請使用展示模式，或先填入 .env.local。')
       return
     }
-    const cleanEmail = email.trim().toLowerCase()
-    if (!cleanEmail) {
-      setError('請輸入 Email。')
+    const cleanIdentifier = email.trim().toLowerCase()
+    if (!cleanIdentifier) {
+      setError(isLogin ? '請輸入帳號或 Email。' : '請輸入 Email。')
       return
     }
+    if (!isLogin && !cleanIdentifier.includes('@')) {
+      setError('註冊或重設密碼時請輸入 Email。')
+      return
+    }
+    const cleanEmail = isLogin ? resolveLoginEmail(cleanIdentifier) : cleanIdentifier
     if (isSignup && password !== confirmPassword) {
       setError('兩次輸入的密碼不一致。')
       return
@@ -207,15 +213,15 @@ function AuthScreen({ onDemo }) {
         </div>
         <form className="auth-form" onSubmit={submit}>
           <label htmlFor="auth-email">
-            Email
+            {isLogin ? '帳號或 Email' : 'Email'}
             <input
               id="auth-email"
-              type="email"
-              autoComplete="email"
+              type={isLogin ? 'text' : 'email'}
+              autoComplete={isLogin ? 'username' : 'email'}
               autoFocus
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
+              placeholder={isLogin ? '輸入測試帳號或 Email' : 'you@example.com'}
               required
             />
           </label>
@@ -285,7 +291,7 @@ function AuthScreen({ onDemo }) {
                 <span className="button-note">使用固定範例資料，不呼叫外部 API</span>
               </button>
             ) : (
-              <p className="config-hint">展示模式已關閉；請使用 Supabase 帳號登入。</p>
+              <p className="config-hint">展示模式已關閉；請使用測試帳號或 Supabase 帳號登入。</p>
             )}
             <button className="text-button" type="button" onClick={() => switchMode(isLogin ? 'signup' : 'login')}>
               {isLogin ? '還沒有帳號？建立測試帳號' : '已有帳號？返回登入'}
@@ -534,7 +540,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
             <div>
               <strong>{isDemo ? '展示模式' : isPublicTest ? '公開測試模式' : 'Live workspace'}</strong>
               <span>{isDemo ? '固定資料' : isPublicTest ? (allowAnyQuery ? '任意 query / 不保存' : '固定 query / 不保存') : 'Supabase session'}</span>
-              {!isDemo && !isPublicTest && session?.user?.email && <span className="session-email">{session.user.email}</span>}
+              {!isDemo && !isPublicTest && session?.user?.email && <span className="session-email">{displayAccount(session.user.email)}</span>}
             </div>
           </div>
           <button className="sidebar-logout" type="button" onClick={logout}>{isPublicTest ? '重新整理' : '登出'}</button>
