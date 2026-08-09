@@ -8,5 +8,8 @@
     "api/seo-generate.js": {
       "maxDuration": 60
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/seo-tool", "destination": "/" }
+  ]
 }
