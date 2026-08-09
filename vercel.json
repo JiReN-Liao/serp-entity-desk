@@ -22,6 +22,7 @@
     }
   ],
   "rewrites": [
-    { "source": "/seo-tool/:path*", "destination": "/" }
+    { "source": "/seo-tool", "destination": "/" },
+    { "source": "/seo-tool/", "destination": "/" }
   ]
 }
