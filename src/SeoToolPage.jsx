@@ -27,6 +27,7 @@ export default function SeoToolPage({ session }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const [copied, setCopied] = useState(false)
   const mounted = useRef(true)
 
   async function checkHealth() {
@@ -70,6 +71,7 @@ export default function SeoToolPage({ session }) {
     setBusy(true)
     setError('')
     setResult(null)
+    setCopied(false)
     try {
       const ready = await ensureReady()
       if (!ready) throw new Error('n8n 尚未完成喚醒，請一分鐘後再試。')
@@ -89,6 +91,13 @@ export default function SeoToolPage({ session }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  async function copyArticle() {
+    if (!result?.revised?.article_markdown) return
+    await navigator.clipboard.writeText(result.revised.article_markdown)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
   }
 
   const stateLabel = serviceState === 'ready'
@@ -128,18 +137,26 @@ export default function SeoToolPage({ session }) {
 
         <section className="seo-output" aria-live="polite">
           {error && <div className="seo-error" role="alert">{error}</div>}
-          {!error && !result && <div className="seo-empty"><strong>結果會顯示在這裡</strong><span>文章、三張圖、修改紀錄與資料夾路由會由 n8n 一次回傳。</span></div>}
+          {!error && !result && !busy && <div className="seo-empty"><strong>結果會顯示在這裡</strong><span>文章、三張圖、修改紀錄與資料夾路由會由 n8n 一次回傳。</span></div>}
+          {!error && !result && busy && <div className="seo-progress" role="status"><strong>正在建立內容</strong><span>Gemini 撰寫初稿</span><span>檢查三個改善點</span><span>插入資訊圖並執行品質閘門</span></div>}
           {result && (
             <>
               <div className="seo-result-head">
-                <div><p className="section-label">REVISED ARTICLE</p><h2>{result.revised.title}</h2></div>
-                <div className="seo-meta"><span>{result.generation_method === 'gemini-ai' ? 'Gemini AI' : 'Workflow'}</span><span>{result.revised.char_count} 字</span><span>{result.revised.images.length} 張圖</span><span>{result.quality_gate}</span><span>{result.folder_path}</span></div>
+                <div><p className="section-label">REVISED ARTICLE</p><h2>{result.revised.title}</h2><p className="seo-description">{result.revised.meta_description}</p></div>
+                <div className="seo-result-actions"><button className="button secondary compact" type="button" onClick={copyArticle}>{copied ? '已複製' : '複製 Markdown'}</button></div>
+                <div className="seo-meta"><span>{result.generation_method === 'gemini-ai' ? 'Gemini AI' : 'Workflow'}</span><span>{result.revised.char_count} 字</span><span>{result.revised.images.length} 張圖</span><span className={result.quality_gate === 'PASS' ? 'pass' : 'review'}>{result.quality_gate}</span><span>{result.folder_path}</span></div>
+                <div className="seo-position-row" aria-label="圖片實際插入位置">{result.revised.images.map((image, index) => <span key={image.image_id}>圖 {index + 1} · {image.measured_position_percent || image.insert_after_pct}</span>)}</div>
               </div>
+              {result.content_warnings?.length > 0 && <div className="seo-warning"><strong>發布前需人工確認</strong>{result.content_warnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}
               <article className="seo-article"><ArticlePreview markdown={result.revised.article_markdown} /></article>
               <section className="seo-improvements">
                 <h2>觀察後修正的三個地方</h2>
                 <ol>{result.improvements.map((item) => <li key={item.point_no}><strong>{item.observed_issue}</strong><span>{item.fix_action}；{item.result}</span></li>)}</ol>
               </section>
+              <details className="seo-draft">
+                <summary>查看 Gemini 初稿</summary>
+                <div><p className="seo-description">{result.draft.meta_description}</p><ArticlePreview markdown={result.draft.article_markdown} /></div>
+              </details>
             </>
           )}
         </section>
