@@ -26,3 +26,12 @@ test('rejects missing required SEO input', () => {
 test('provides a safe default folder', () => {
   assert.equal(sanitizeFolder(''), 'formal-site/seo-tool')
 })
+
+test('rejects non-text required fields instead of coercing objects', () => {
+  assert.deepEqual(validateSeoInput({
+    keyword: { value: 'not text' },
+    product: '產品',
+    scenario: '情境',
+  }), { ok: false, error: '缺少欄位：keyword' })
+  assert.equal(sanitizeFolder({ path: 'unsafe' }), 'formal-site/seo-tool')
+})

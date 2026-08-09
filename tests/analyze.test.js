@@ -96,6 +96,16 @@ test('filters number-plus-unit fragments without removing meaningful product tok
   }
 })
 
+test('merges case variants of the same Latin entity', () => {
+  const entities = extractEntities(
+    'iPhone 16',
+    'iPhone 16 手機比較',
+    'iphone 與 IPHONE 的裝置相容性比較。',
+    'iPhone 適合日常使用；iphone 的裝置生態與支援服務也會影響選擇。',
+  )
+  assert.equal(entities.filter((entity) => entity.name.toLowerCase() === 'iphone').length, 1)
+})
+
 test('entity extraction tolerates missing or non-text source fields', () => {
   assert.doesNotThrow(() => extractEntities(null, undefined, { title: 'not text' }, ['unexpected']))
   assert.deepEqual(extractEntities(null, undefined, { title: 'not text' }, ['unexpected']), [])

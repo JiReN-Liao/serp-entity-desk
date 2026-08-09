@@ -5,8 +5,12 @@ const limits = {
   target_folder_key: 180,
 }
 
+function safeText(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 export function sanitizeFolder(value) {
-  return String(value || 'formal-site/seo-tool')
+  return (safeText(value) || 'formal-site/seo-tool')
     .trim()
     .replace(/[^a-zA-Z0-9_./-]/g, '-')
     .replace(/\/{2,}/g, '/')
@@ -15,10 +19,10 @@ export function sanitizeFolder(value) {
 }
 
 export function validateSeoInput(value) {
-  const source = value && typeof value === 'object' ? value : {}
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const fields = ['keyword', 'product', 'scenario']
   for (const field of fields) {
-    const text = String(source[field] || '').trim()
+    const text = safeText(source[field])
     if (!text) return { ok: false, error: `缺少欄位：${field}` }
     if (text.length > limits[field]) return { ok: false, error: `${field} 超過長度限制` }
   }
