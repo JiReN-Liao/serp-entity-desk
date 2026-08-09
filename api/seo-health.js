@@ -1,12 +1,17 @@
 import { verifySupabaseUser } from './auth-user.js'
 
 export default async function handler(req, res) {
-  res.setHeader('cache-control', 'no-store')
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0')
   if (req.method !== 'GET') {
     res.setHeader('allow', 'GET')
     return res.status(405).json({ error: '只接受 GET。' })
   }
-  if (!await verifySupabaseUser(req)) return res.status(401).json({ ready: false, state: 'unauthorized' })
+  try {
+    if (!await verifySupabaseUser(req)) return res.status(401).json({ ready: false, state: 'unauthorized' })
+  } catch (error) {
+    console.error('SEO health auth failed:', error?.message || error)
+    return res.status(503).json({ ready: false, state: 'auth-unavailable' })
+  }
   const webhookUrl = process.env.N8N_SEO_WEBHOOK_URL
   if (!webhookUrl) return res.status(503).json({ ready: false, state: 'not_configured' })
 

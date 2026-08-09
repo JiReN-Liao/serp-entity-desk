@@ -75,6 +75,7 @@ function setCors(req, res) {
 }
 
 function json(res, status, payload) {
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0')
   res.status(status).json(payload)
 }
 
@@ -210,6 +211,11 @@ function isNumericLikeToken(value) {
   return /^\d+(?:[.,/-]\d+)*$/.test(String(value || '').trim())
 }
 
+function canonicalEntityKey(value) {
+  const normalized = normalizeText(value)
+  return /[A-Za-z]/.test(normalized) ? normalized.toLowerCase() : normalized
+}
+
 function isStopword(value) {
   const normalized = String(value || '').trim()
   return STOPWORDS.has(normalized) || STOPWORDS.has(normalized.toLowerCase())
@@ -285,7 +291,13 @@ function extractEntities(query, title, snippet, articleText) {
   addChineseCandidates(text, candidateSet)
   addLatinCandidates(text, candidateSet)
 
-  const scored = [...candidateSet]
+  const canonicalCandidates = new Map()
+  for (const candidate of candidateSet) {
+    const key = canonicalEntityKey(candidate)
+    if (!canonicalCandidates.has(key)) canonicalCandidates.set(key, candidate)
+  }
+
+  const scored = [...canonicalCandidates.values()]
     .map((name) => {
       const frequency = occurrenceCount(text, name)
       const inTitle = normalizedTitle.toLowerCase().includes(name.toLowerCase())
@@ -327,7 +339,7 @@ async function fetchArticle(link) {
 
     const html = (await response.text()).slice(0, 1_500_000)
     const $ = cheerio.load(html)
-    $('script, style, noscript, nav, footer, header, aside, form, iframe, svg').remove()
+    $('script, style, noscript, nav, footer, header, aside, form, iframe, svg, [hidden], [aria-hidden="true"], [class*="cookie"], [id*="cookie"], [class*="consent"], [id*="consent"], [class*="breadcrumb"], [id*="breadcrumb"], [class*="social"], [id*="social"], [class*="pagination"], [id*="pagination"]').remove()
     const candidates = $('article, main, [role="main"], .article, .article-content, .post-content, .entry-content, #content')
       .toArray()
       .map((node) => normalizeText($(node).text()))
@@ -337,7 +349,7 @@ async function fetchArticle(link) {
     return { text, fetchStatus: 'ok' }
   } catch (error) {
     const message = error?.name === 'AbortError' ? '抓取逾時' : '抓取失敗'
-    return { text: '', fetchStatus: message, error: error?.message || message }
+    return { text: '', fetchStatus: message, error: message }
   }
 }
 
@@ -354,7 +366,7 @@ async function searchSerpApi(query, gl, hl) {
   const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, requestTimeoutMs())
   const payload = await response.json().catch(() => ({}))
   if (!isRecord(payload)) throw new Error('SerpApi 回傳格式無法解析。')
-  if (!response.ok || payload.error) throw new Error(payload.error || `SerpApi 回傳 ${response.status}`)
+  if (!response.ok || payload.error) throw new Error(normalizeText(payload.error) || `SerpApi 回傳 ${response.status}`)
   return (Array.isArray(payload.organic_results) ? payload.organic_results : [])
     .map((item, index) => {
       const link = normalizePublicHttpUrl(item?.link)
@@ -375,10 +387,11 @@ function aggregate(articles) {
   const entityMap = new Map()
   for (const article of articles) {
     for (const entity of article.entities) {
-      const current = entityMap.get(entity.name) || { name: entity.name, totalFrequency: 0, articleCount: 0, topic: entity.topic }
+      const key = canonicalEntityKey(entity.name)
+      const current = entityMap.get(key) || { name: entity.name, totalFrequency: 0, articleCount: 0, topic: entity.topic }
       current.totalFrequency += entity.frequency
       current.articleCount += 1
-      entityMap.set(entity.name, current)
+      entityMap.set(key, current)
     }
   }
   const entities = [...entityMap.values()].sort((a, b) => b.totalFrequency - a.totalFrequency || b.articleCount - a.articleCount)
@@ -404,7 +417,7 @@ async function verifyUser(authorization) {
   if (!url || !anonKey) throw new Error('伺服器尚未設定 Supabase Auth 環境變數。')
   const client = createClient(url, anonKey, { global: { headers: { Authorization: `Bearer ${token}` } } })
   const { data, error } = await client.auth.getUser()
-  if (error || !data.user) return null
+  if (error || !data?.user) return null
   return data.user
 }
 

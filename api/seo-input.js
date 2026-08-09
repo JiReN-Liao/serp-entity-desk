@@ -31,9 +31,9 @@ export function validateSeoInput(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const fields = ['keyword', 'product', 'scenario']
   for (const field of fields) {
-    const value = cleanText(source[field])
-    if (!value) return { ok: false, error: `請填寫${labels[field]}。` }
-    if ([...value].length > limits[field]) return { ok: false, error: `${labels[field]}超過 ${limits[field]} 字。` }
+    const text = cleanText(source[field])
+    if (!text) return { ok: false, error: `請填寫${labels[field]}。` }
+    if ([...text].length > limits[field]) return { ok: false, error: `${labels[field]}超過 ${limits[field]} 字。` }
   }
   return {
     ok: true,

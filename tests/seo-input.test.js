@@ -30,6 +30,7 @@ test('provides a safe default folder', () => {
 test('rejects non-string and overlong values without coercing objects', () => {
   assert.equal(validateSeoInput({ keyword: {}, product: '服務', scenario: '情境' }).ok, false)
   assert.equal(validateSeoInput({ keyword: '字'.repeat(121), product: '服務', scenario: '情境' }).error, '關鍵字超過 120 字。')
+  assert.equal(sanitizeFolder({ path: 'unsafe' }), 'formal-site/seo-tool')
 })
 
 test('removes invisible control characters from input', () => {

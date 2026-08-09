@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { demoAllowed, publicTestAllowed, publicTestAllowAnyQuery, supabase } from './supabaseClient.js'
 import { getDemoResult } from './demoData.js'
 import { displayAccount, resolveLoginEmail } from './authIdentifier.js'
@@ -540,6 +540,11 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const mounted = useRef(true)
+
+  useEffect(() => () => {
+    mounted.current = false
+  }, [])
 
   async function refreshHistory() {
     if (isDemo || isPublicTest || !session?.access_token) return
@@ -548,6 +553,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
       const { response, body } = await fetchJson('/api/history', {
         headers: { Authorization: `Bearer ${session.access_token}` },
       }, HISTORY_REQUEST_TIMEOUT_MS)
+      if (!mounted.current) return
       if (response.ok && isRecord(body) && Array.isArray(body.history)) {
         setHistory(body.history.filter(isRecord).map((item) => ({
           id: safeText(item.id) || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
@@ -563,7 +569,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
     } catch {
       setHistoryError('無法連線到歷史分析；仍可繼續執行新查詢。')
     } finally {
-      setHistoryBusy(false)
+      if (mounted.current) setHistoryBusy(false)
     }
   }
 
@@ -596,6 +602,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
         if (!response.ok) throw new Error(apiErrorMessage(body, response.status, '分析失敗'))
         const nextResult = normalizeAnalysisResult(isRecord(body) ? body.result || body : null, nextQuery)
         if (!nextResult) throw new Error('分析服務回傳格式異常，請稍後再試。')
+        if (!mounted.current) return
         setResult(nextResult)
         await refreshHistory()
         setNotice(isPublicTest
@@ -605,9 +612,9 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
             : nextResult.persistence?.persistenceError || '分析完成，但歷史尚未保存；請確認 Supabase schema。')
       }
     } catch (runError) {
-      setError(runError.message || '分析失敗，請稍後再試。')
+      if (mounted.current) setError(runError.message || '分析失敗，請稍後再試。')
     } finally {
-      setBusy(false)
+      if (mounted.current) setBusy(false)
     }
   }
 
@@ -624,7 +631,9 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
   }
 
   return (
-    <div className="app-shell">
+    <>
+      <a className="skip-link" href="#main-content">跳到主要內容</a>
+      <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-lockup sidebar-brand">
           <span className="brand-mark">SE</span>
@@ -679,7 +688,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
         </div>
       </aside>
 
-      <main className="main-content">
+      <main className="main-content" id="main-content" aria-busy={busy}>
         <header className="topbar">
           <div>
             <p className="section-label">ANALYSIS WORKSPACE</p>
@@ -724,12 +733,19 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
           </div>
         </section>
 
+        {busy && <div className="alert info" role="status">正在抓取 Google 第一頁、讀取可取得的文章正文並整理 entity，請稍候…</div>}
         {isPublicTest && <div className="alert info" role="status">公開測試模式：{allowAnyQuery ? '可查任意關鍵字' : '只允許「4G 吃到飽」'}，每次分析結果不會寫入 Supabase。</div>}
-        {error && <div className="alert error" role="alert">{error}</div>}
+        {error && (
+          <div className="alert error alert-with-action" role="alert">
+            <span>{error}</span>
+            <button className="text-button alert-action" type="button" onClick={() => runAnalysis()}>再試一次</button>
+          </div>
+        )}
         {notice && <div className="alert info" role="status">{notice}</div>}
         {result ? <ResultView result={result} /> : <EmptyState onRun={runAnalysis} />}
       </main>
-    </div>
+      </div>
+    </>
   )
 }
 

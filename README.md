@@ -29,6 +29,7 @@
 - Live 模式：需要 SerpApi、Supabase 與 Vercel 設定；未填金鑰前不宣稱已部署或已連線。
 - entity 抽取目前是可解釋的規則式候選抽取，不等同完整命名實體辨識（NER）；會排除純數字、日期／比例拆出的數字、純版本號、URL／檔案副檔名與常見網頁導覽／分享／登入 boilerplate，保留 `4G`、`5G`、`20GB` 等帶語意的混合 token。後續若需要語意級精度，再替換 `api/analyze.js` 的 extractor，不改 UI 與資料格式。
 - 可靠性防護：錯誤或空的 request body、無 organic results、單篇來源抓取失敗、SERP／網路逾時與非 JSON 回應都會降級成可讀提示或保留文章狀態，不讓單一來源使整批結果或前端畫面崩潰。
+- Production hardening：私人 API 回應使用 `private, no-store`，Vercel 加上 CSP、`nosniff`、`frame-ancestors`、Referrer Policy 與 Permissions Policy；React 最外層有錯誤邊界，SEO workflow 也會驗證 n8n 回傳格式、圖片 URL 與剪貼簿失敗狀態。
 
 ## 需要的帳號／金鑰
 
