@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { demoAllowed, publicTestAllowed, publicTestAllowAnyQuery, supabase } from './supabaseClient.js'
 import { getDemoResult } from './demoData.js'
 import { displayAccount, resolveLoginEmail } from './authIdentifier.js'
+import SeoToolPage from './SeoToolPage.jsx'
 
 const defaultQuery = '4G 吃到飽'
 
@@ -38,6 +39,7 @@ function domainFromUrl(value) {
 }
 
 function App() {
+  const isSeoTool = window.location.pathname.replace(/\/+$/, '') === '/seo-tool'
   const [session, setSession] = useState(null)
   const [isDemo, setIsDemo] = useState(false)
   const [passwordRecovery, setPasswordRecovery] = useState(false)
@@ -70,9 +72,10 @@ function App() {
   if (passwordRecovery && session) {
     return <PasswordRecoveryScreen onComplete={() => setPasswordRecovery(false)} />
   }
-  if (!session && !isDemo && !publicTestAllowed) {
+  if (!session && (isSeoTool || (!isDemo && !publicTestAllowed))) {
     return <AuthScreen onDemo={() => setIsDemo(true)} />
   }
+  if (isSeoTool && session) return <SeoToolPage session={session} />
 
   return (
     <Dashboard
@@ -201,6 +204,7 @@ function AuthScreen({ onDemo }) {
           <span className="status-dot" />
           <span>Live 模式需要 SerpApi；登入由 Supabase Auth 管理。</span>
         </div>
+        <a className="auth-tool-link" href="/seo-tool">查看第 7 題 SEO 內容產生器 →</a>
       </section>
 
       <section className="auth-panel" aria-labelledby="auth-title">
@@ -503,6 +507,7 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
           <span className="sidebar-caption">CURRENT WORKSPACE</span>
           <strong>SEO Content Signals</strong>
           <span className="sidebar-description">SERP → entities → topics</span>
+          <a className="sidebar-tool-link" href="/seo-tool">第 7 題 · SEO 內容工具</a>
         </div>
         <div className="history-block" aria-label="最近分析">
           <span className="sidebar-caption">RECENT ANALYSIS</span>

@@ -4,6 +4,9 @@
   "functions": {
     "api/analyze.js": {
       "maxDuration": 60
+    },
+    "api/seo-generate.js": {
+      "maxDuration": 60
     }
   }
 }
