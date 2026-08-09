@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import analyzeHandler, { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed, isNumericLikeToken } from '../api/analyze.js'
+import analyzeHandler, { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed, isNumericLikeToken, isNoiseToken } from '../api/analyze.js'
 import historyHandler from '../api/history.js'
 
 function mockResponse(resolve) {
@@ -68,6 +68,23 @@ test('filters numeric noise while keeping meaningful mixed tokens', () => {
   assert.equal(names.has('5G'), true)
   assert.equal(names.has('20GB'), true)
   assert.equal(isNumericLikeToken('4G'), false)
+})
+
+test('filters common web boilerplate and one-off latin noise for other queries', () => {
+  const entities = extractEntities(
+    '台北咖啡店',
+    '台北咖啡店推薦 2026',
+    '首頁 分享 收藏 閱讀全文 https www cookie login。',
+    '台北咖啡店提供手沖咖啡與甜點。歡迎使用網站搜尋、登入、分享；地址 100 號。版本 2.33.4。咖啡店適合平日休息。',
+  )
+  const names = new Set(entities.map((entity) => entity.name))
+  for (const value of ['100', '2026', '2.33.4', 'https', 'www', 'cookie', 'login', 'share']) {
+    assert.equal(names.has(value), false, `boilerplate token leaked: ${value}`)
+  }
+  assert.equal(names.has('台北咖啡店'), true)
+  assert.equal(names.has('咖啡店'), true)
+  assert.equal(isNoiseToken('https'), true)
+  assert.equal(isNoiseToken('4G'), false)
 })
 
 test('history route rejects unauthenticated requests', async () => {

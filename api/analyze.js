@@ -14,8 +14,15 @@ const STOPWORDS = new Set([
   '可以', '以及', '這個', '這些', '我們', '你們', '他們', '如何', '什麼', '為什麼', '如果', '因此',
   '使用', '相關', '內容', '文章', '資料', '目前', '開始', '最後', '方式', '問題', '比較', '了解',
   '提供', '建議', '需要', '透過', '進行', '是否', '以及', '不過', '一個', '很多', '這樣', '更多',
+  '首頁', '目錄', '網站', '網頁', '頁面', '本文', '全文', '閱讀', '閱讀全文', '分享', '收藏', '訂閱', '登入',
+  '註冊', '搜尋', '查看', '點擊', '繼續', '返回', '上一頁', '下一頁', '載入', '錯誤', '選單', '留言', '評論',
+  '作者', '日期', '時間', '更新', '版權', '隱私', '條款', '聯絡', '關於', '推薦', '立即', '更多資訊',
   'the', 'and', 'for', 'with', 'from', 'that', 'this', 'your', 'you', 'are', 'was', 'will', 'have',
   'about', 'into', 'than', 'then', 'when', 'where', 'what', 'which', 'how', 'not', 'our', 'their',
+  'https', 'http', 'www', 'com', 'net', 'org', 'html', 'htm', 'php', 'css', 'js', 'json', 'xml', 'svg',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'cookie', 'cookies', 'share', 'login', 'logout', 'signup', 'search',
+  'menu', 'header', 'footer', 'sidebar', 'related', 'recommend', 'comment', 'comments', 'page', 'next', 'prev',
+  'previous', 'loading', 'error', 'home', 'url', 'utm', 'amp', 'api',
 ])
 
 const TOPIC_RULES = [
@@ -161,6 +168,19 @@ function isNumericLikeToken(value) {
   return /^\d+(?:[.,/-]\d+)*$/.test(String(value || '').trim())
 }
 
+function isStopword(value) {
+  const normalized = String(value || '').trim()
+  return STOPWORDS.has(normalized) || STOPWORDS.has(normalized.toLowerCase())
+}
+
+function isNoiseToken(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized || isNumericLikeToken(normalized) || isStopword(normalized)) return true
+  if (/^v?\d+(?:[._/-]\d+)+$/i.test(normalized)) return true
+  if (/^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(normalized)) return true
+  return false
+}
+
 function classifyTopic(name) {
   const lowerName = name.toLowerCase()
   return TOPIC_RULES.find((rule) => rule.keywords.some((keyword) => lowerName.includes(keyword.toLowerCase())))?.topic || '其他'
@@ -177,7 +197,7 @@ function addChineseCandidates(text, candidateSet) {
     const segmenter = new Intl.Segmenter('zh-TW', { granularity: 'word' })
     for (const segment of segmenter.segment(text)) {
       const value = normalizeText(segment.segment)
-      if (segment.isWordLike && /[\u3400-\u9fff]/.test(value) && value.length >= 3 && !STOPWORDS.has(value)) {
+      if (segment.isWordLike && /[\u3400-\u9fff]/.test(value) && value.length >= 3 && !isNoiseToken(value)) {
         candidateSet.add(value)
       }
     }
@@ -186,7 +206,7 @@ function addChineseCandidates(text, candidateSet) {
 
   const runs = text.match(/[\u3400-\u9fff]{3,12}/g) || []
   for (const run of runs) {
-    if (!STOPWORDS.has(run)) candidateSet.add(run)
+    if (!isNoiseToken(run)) candidateSet.add(run)
   }
 }
 
@@ -197,8 +217,7 @@ function addLatinCandidates(text, candidateSet) {
     if (
       normalized.length < 2 ||
       normalized.length > 40 ||
-      isNumericLikeToken(normalized) ||
-      STOPWORDS.has(normalized.toLowerCase())
+      isNoiseToken(normalized)
     ) continue
     candidateSet.add(normalized)
   }
@@ -208,7 +227,7 @@ function extractEntities(query, title, snippet, articleText) {
   const text = normalizeText(`${query} ${title} ${snippet} ${articleText}`).slice(0, 50000)
   const candidateSet = new Set()
   const normalizedQuery = normalizeText(query)
-  if (normalizedQuery.length >= 2 && normalizedQuery.length <= 30 && !isNumericLikeToken(normalizedQuery)) {
+  if (normalizedQuery.length >= 2 && normalizedQuery.length <= 30 && !isNoiseToken(normalizedQuery)) {
     candidateSet.add(normalizedQuery)
   }
   addChineseCandidates(text, candidateSet)
@@ -223,10 +242,10 @@ function extractEntities(query, title, snippet, articleText) {
       return { name, frequency, score, topic: classifyTopic(name) }
     })
     .filter((entity) => {
-      if (isNumericLikeToken(entity.name)) return false
+      if (isNoiseToken(entity.name)) return false
       const inTitle = title.toLowerCase().includes(entity.name.toLowerCase())
       const knownTopic = entity.topic !== '其他'
-      const mixedToken = /[A-Za-z0-9]/.test(entity.name)
+      const mixedToken = /[A-Za-z]/.test(entity.name) && /\d/.test(entity.name)
       return entity.frequency > 0 && (knownTopic || inTitle || entity.frequency >= 2 || mixedToken)
     })
     .sort((a, b) => b.score - a.score || b.frequency - a.frequency || a.name.localeCompare(b.name))
@@ -435,4 +454,4 @@ export default async function handler(req, res) {
   }
 }
 
-export { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed, isNumericLikeToken }
+export { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed, isNumericLikeToken, isNoiseToken }
