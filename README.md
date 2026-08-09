@@ -8,7 +8,7 @@
 - 展示模式：沒有外部金鑰時可用一組明確標示為「展示資料」的固定資料檢查 UI；它不冒充即時 SERP。
 - 公開測試模式（暫時）：可在不登入的情況下查詢任意關鍵字；不保存 Supabase 歷史，並以每個來源 IP 的 best-effort 冷卻時間降低免費 API 被重複消耗的風險。也可以把 `PUBLIC_TEST_ALLOW_ANY_QUERY=false` 關掉任意查詢，改成只允許 `PUBLIC_TEST_QUERY`。這只適合短時間 Demo，驗證完成後應關閉。
 - Live 模式：需要 SerpApi、Supabase 與 Vercel 設定；未填金鑰前不宣稱已部署或已連線。
-- entity 抽取目前是可解釋的規則式候選抽取，不等同完整命名實體辨識（NER）。後續若需要語意級精度，再替換 `api/analyze.js` 的 extractor，不改 UI 與資料格式。
+- entity 抽取目前是可解釋的規則式候選抽取，不等同完整命名實體辨識（NER）；會排除純數字、日期／比例拆出的數字與純版本號，保留 `4G`、`5G`、`20GB` 等帶語意的混合 token。後續若需要語意級精度，再替換 `api/analyze.js` 的 extractor，不改 UI 與資料格式。
 
 ## 需要的帳號／金鑰
 

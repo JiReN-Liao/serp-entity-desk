@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import analyzeHandler, { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed } from '../api/analyze.js'
+import analyzeHandler, { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed, isNumericLikeToken } from '../api/analyze.js'
 import historyHandler from '../api/history.js'
 
 function mockResponse(resolve) {
@@ -50,6 +50,24 @@ test('keeps query terms and classifies useful entity candidates', () => {
   assert.equal(names.has('4G'), true)
   assert.equal(entities.every((entity) => entity.frequency > 0 && entity.topic), true)
   assert.equal(entities.some((entity) => entity.topic === '資費與合約'), true)
+})
+
+test('filters numeric noise while keeping meaningful mixed tokens', () => {
+  const entities = extractEntities(
+    '4G 吃到飽',
+    '4G 吃到飽方案推薦 2026',
+    '月租 20、流量 100GB、速度 5G，更新日期 2026-08-09。',
+    '方案價格 10 20 12 60 100 2026，版本 2.33.4；支援 4G、5G 與 20GB 流量。',
+  )
+  const names = new Set(entities.map((entity) => entity.name))
+  for (const value of ['10', '12', '20', '60', '100', '2026', '2.33.4']) {
+    assert.equal(names.has(value), false, `numeric token leaked: ${value}`)
+    assert.equal(isNumericLikeToken(value), true)
+  }
+  assert.equal(names.has('4G'), true)
+  assert.equal(names.has('5G'), true)
+  assert.equal(names.has('20GB'), true)
+  assert.equal(isNumericLikeToken('4G'), false)
 })
 
 test('history route rejects unauthenticated requests', async () => {

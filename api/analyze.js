@@ -157,6 +157,10 @@ function occurrenceCount(text, candidate) {
   return text.match(new RegExp(escapeRegExp(candidate), flags))?.length || 0
 }
 
+function isNumericLikeToken(value) {
+  return /^\d+(?:[.,/-]\d+)*$/.test(String(value || '').trim())
+}
+
 function classifyTopic(name) {
   const lowerName = name.toLowerCase()
   return TOPIC_RULES.find((rule) => rule.keywords.some((keyword) => lowerName.includes(keyword.toLowerCase())))?.topic || '其他'
@@ -190,7 +194,12 @@ function addLatinCandidates(text, candidateSet) {
   const words = text.match(/[A-Za-z0-9][A-Za-z0-9+.-]*/g) || []
   for (const word of words) {
     const normalized = word.trim()
-    if (normalized.length < 2 || normalized.length > 40 || STOPWORDS.has(normalized.toLowerCase())) continue
+    if (
+      normalized.length < 2 ||
+      normalized.length > 40 ||
+      isNumericLikeToken(normalized) ||
+      STOPWORDS.has(normalized.toLowerCase())
+    ) continue
     candidateSet.add(normalized)
   }
 }
@@ -199,7 +208,9 @@ function extractEntities(query, title, snippet, articleText) {
   const text = normalizeText(`${query} ${title} ${snippet} ${articleText}`).slice(0, 50000)
   const candidateSet = new Set()
   const normalizedQuery = normalizeText(query)
-  if (normalizedQuery.length >= 2 && normalizedQuery.length <= 30) candidateSet.add(normalizedQuery)
+  if (normalizedQuery.length >= 2 && normalizedQuery.length <= 30 && !isNumericLikeToken(normalizedQuery)) {
+    candidateSet.add(normalizedQuery)
+  }
   addChineseCandidates(text, candidateSet)
   addLatinCandidates(text, candidateSet)
 
@@ -212,6 +223,7 @@ function extractEntities(query, title, snippet, articleText) {
       return { name, frequency, score, topic: classifyTopic(name) }
     })
     .filter((entity) => {
+      if (isNumericLikeToken(entity.name)) return false
       const inTitle = title.toLowerCase().includes(entity.name.toLowerCase())
       const knownTopic = entity.topic !== '其他'
       const mixedToken = /[A-Za-z0-9]/.test(entity.name)
@@ -423,4 +435,4 @@ export default async function handler(req, res) {
   }
 }
 
-export { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed }
+export { extractEntities, isPrivateIp, isSafePublicUrl, isPublicTestQueryAllowed, isNumericLikeToken }
