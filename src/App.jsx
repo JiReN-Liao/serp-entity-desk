@@ -38,6 +38,128 @@ function domainFromUrl(value) {
   }
 }
 
+const ANALYSIS_REQUEST_TIMEOUT_MS = 55_000
+const HISTORY_REQUEST_TIMEOUT_MS = 12_000
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function safeText(value, fallback = '') {
+  if (typeof value === 'string') return value.trim() || fallback
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return fallback
+}
+
+function safeCount(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0
+}
+
+function safeHttpHref(value) {
+  if (typeof value !== 'string') return ''
+  try {
+    const parsed = new URL(value)
+    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString() : ''
+  } catch {
+    return ''
+  }
+}
+
+function normalizeArticleEntity(value) {
+  if (!isRecord(value)) return null
+  const name = safeText(value.name)
+  return name ? { name, frequency: safeCount(value.frequency), topic: safeText(value.topic, '其他') } : null
+}
+
+function normalizeGlobalEntity(value) {
+  if (!isRecord(value)) return null
+  const name = safeText(value.name)
+  return name
+    ? {
+      name,
+      totalFrequency: safeCount(value.totalFrequency),
+      articleCount: safeCount(value.articleCount),
+      topic: safeText(value.topic, '其他'),
+    }
+    : null
+}
+
+function normalizeAnalysisResult(value, fallbackQuery) {
+  if (!isRecord(value) || !isRecord(value.summary) || !Array.isArray(value.articles) || !Array.isArray(value.entities) || !Array.isArray(value.clusters)) {
+    return null
+  }
+  const articles = value.articles.map((article, index) => {
+    if (!isRecord(article)) return null
+    return {
+      position: safeCount(article.position) || index + 1,
+      title: safeText(article.title, '未命名文章'),
+      source: safeText(article.source, '未知來源'),
+      link: safeHttpHref(article.link),
+      snippet: safeText(article.snippet),
+      fetchStatus: safeText(article.fetchStatus, '已處理'),
+      fetchError: safeText(article.fetchError) || null,
+      entityCount: safeCount(article.entityCount),
+      entities: Array.isArray(article.entities) ? article.entities.map(normalizeArticleEntity).filter(Boolean) : [],
+    }
+  }).filter(Boolean)
+  const entities = value.entities.map(normalizeGlobalEntity).filter(Boolean)
+  const clusters = value.clusters.map((cluster) => {
+    if (!isRecord(cluster)) return null
+    return {
+      topic: safeText(cluster.topic, '其他'),
+      entityCount: safeCount(cluster.entityCount),
+      totalFrequency: safeCount(cluster.totalFrequency),
+      entities: Array.isArray(cluster.entities) ? cluster.entities.map(normalizeGlobalEntity).filter(Boolean) : [],
+    }
+  }).filter(Boolean)
+  return {
+    query: safeText(value.query, fallbackQuery),
+    source: safeText(value.source, 'serpapi'),
+    mode: safeText(value.mode, 'live'),
+    createdAt: safeText(value.createdAt),
+    notice: safeText(value.notice, '分析完成。'),
+    summary: {
+      articleCount: safeCount(value.summary.articleCount),
+      entityCount: safeCount(value.summary.entityCount),
+      clusterCount: safeCount(value.summary.clusterCount),
+      totalMentions: safeCount(value.summary.totalMentions),
+    },
+    articles,
+    entities,
+    clusters,
+    persistence: isRecord(value.persistence) ? value.persistence : { persisted: false },
+  }
+}
+
+async function fetchJson(url, options = {}, timeoutMs = 15_000) {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal })
+    const raw = await response.text()
+    let body = {}
+    if (raw.trim()) {
+      try {
+        body = JSON.parse(raw)
+      } catch {
+        body = {}
+      }
+    }
+    return { response, body }
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('請求逾時，請稍後再試。')
+    throw new Error('目前無法連線到服務，請稍後再試。')
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
+
+function apiErrorMessage(body, status, fallback) {
+  const message = isRecord(body) ? safeText(body.error) : ''
+  return message || `${fallback}（${status}）`
+}
+
 function App() {
   const isSeoTool = window.location.pathname.replace(/\/+$/, '') === '/seo-tool'
   const [session, setSession] = useState(null)
@@ -423,15 +545,20 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
     if (isDemo || isPublicTest || !session?.access_token) return
     setHistoryBusy(true)
     try {
-      const response = await fetch('/api/history', {
+      const { response, body } = await fetchJson('/api/history', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      const body = await response.json().catch(() => ({}))
-      if (response.ok) {
-        setHistory(body.history || [])
+      }, HISTORY_REQUEST_TIMEOUT_MS)
+      if (response.ok && isRecord(body) && Array.isArray(body.history)) {
+        setHistory(body.history.filter(isRecord).map((item) => ({
+          id: safeText(item.id) || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+          query: safeText(item.query, '未命名查詢'),
+          createdAt: safeText(item.createdAt),
+          articleCount: safeCount(item.articleCount),
+          entityCount: safeCount(item.entityCount),
+        })))
         setHistoryError('')
       } else {
-        setHistoryError(body.error || '無法讀取歷史分析。')
+        setHistoryError(response.ok ? '歷史資料格式異常。' : apiErrorMessage(body, response.status, '無法讀取歷史分析'))
       }
     } catch {
       setHistoryError('無法連線到歷史分析；仍可繼續執行新查詢。')
@@ -461,14 +588,14 @@ function Dashboard({ session, isDemo, isPublicTest, allowAnyQuery, onDemoLogout 
       } else {
         const headers = { 'Content-Type': 'application/json' }
         if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
-        const response = await fetch('/api/analyze', {
+        const { response, body } = await fetchJson('/api/analyze', {
           method: 'POST',
           headers,
           body: JSON.stringify({ query: nextQuery, gl: 'tw', hl: 'zh-tw', persist: !isPublicTest }),
-        })
-        const body = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(body.error || `分析失敗（${response.status}）`)
-        const nextResult = body.result || body
+        }, ANALYSIS_REQUEST_TIMEOUT_MS)
+        if (!response.ok) throw new Error(apiErrorMessage(body, response.status, '分析失敗'))
+        const nextResult = normalizeAnalysisResult(isRecord(body) ? body.result || body : null, nextQuery)
+        if (!nextResult) throw new Error('分析服務回傳格式異常，請稍後再試。')
         setResult(nextResult)
         await refreshHistory()
         setNotice(isPublicTest
@@ -656,7 +783,7 @@ function ResultView({ result }) {
             <span className="panel-caption">依文章內容計算</span>
           </div>
           <div className="bar-list">
-            {topEntities.map((entity) => (
+            {topEntities.length ? topEntities.map((entity) => (
               <div className="bar-row" key={entity.name}>
                 <div className="bar-label"><strong>{entity.name}</strong><span>{entity.articleCount} 篇</span></div>
                 <div className="bar-track" aria-label={`${entity.name} ${entity.totalFrequency} 次`}>
@@ -664,7 +791,7 @@ function ResultView({ result }) {
                 </div>
                 <strong className="bar-value">{entity.totalFrequency}</strong>
               </div>
-            ))}
+            )) : <p className="result-empty-copy">這次沒有可展示的 entity，請換一組更具體的關鍵字。</p>}
           </div>
           <p className="method-note">一次在同一篇文章出現多次會累計頻率；articleCount 則只算是否出現在該篇。</p>
         </section>
@@ -677,7 +804,7 @@ function ResultView({ result }) {
             <span className="panel-caption">規則式 MVP</span>
           </div>
           <div className="cluster-list">
-            {result.clusters.map((cluster, index) => (
+            {result.clusters.length ? result.clusters.map((cluster, index) => (
               <div className="cluster-row" key={cluster.topic}>
                 <span className={`cluster-index cluster-${index % 5}`}>{String(index + 1).padStart(2, '0')}</span>
                 <div className="cluster-content">
@@ -688,7 +815,7 @@ function ResultView({ result }) {
                   </div>
                 </div>
               </div>
-            ))}
+            )) : <p className="result-empty-copy">目前沒有可分群的候選詞。</p>}
           </div>
         </section>
       </div>
@@ -706,11 +833,13 @@ function ResultView({ result }) {
               <tr><th scope="col">排名</th><th scope="col">文章</th><th scope="col">來源</th><th scope="col">Entities</th><th scope="col">狀態</th></tr>
             </thead>
             <tbody>
-              {result.articles.map((article) => (
+              {result.articles.length ? result.articles.map((article) => (
                 <tr key={`${article.position}-${article.link}`}>
                   <td className="rank-cell">{String(article.position).padStart(2, '0')}</td>
                   <td className="article-cell">
-                    <a href={article.link} target="_blank" rel="noreferrer">{article.title}</a>
+                    {article.link
+                      ? <a href={article.link} target="_blank" rel="noreferrer">{article.title}</a>
+                      : <strong className="article-title">{article.title}</strong>}
                     <span>{article.snippet || '未提供摘要'}</span>
                     {article.entities?.length > 0 && <div className="table-entities">{article.entities.slice(0, 4).map((entity) => <span key={entity.name}>{entity.name}</span>)}</div>}
                   </td>
@@ -718,7 +847,7 @@ function ResultView({ result }) {
                   <td className="count-cell"><strong>{article.entityCount}</strong><span>候選</span></td>
                   <td><span className={article.fetchStatus === 'ok' ? 'badge success' : 'badge neutral'}>{article.fetchStatus || '已處理'}</span></td>
                 </tr>
-              ))}
+              )) : <tr><td className="result-empty-row" colSpan="5">這次搜尋沒有取得 Google organic results，請換一組關鍵字再試。</td></tr>}
             </tbody>
           </table>
         </div>

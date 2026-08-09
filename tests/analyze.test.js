@@ -87,6 +87,113 @@ test('filters common web boilerplate and one-off latin noise for other queries',
   assert.equal(isNoiseToken('4G'), false)
 })
 
+test('filters number-plus-unit fragments without removing meaningful product tokens', () => {
+  for (const value of ['2026年', '2026年8月9日', '100元', '3個', '第10名', '25%']) {
+    assert.equal(isNoiseToken(value), true, `number fragment leaked: ${value}`)
+  }
+  for (const value of ['4G', '5G', '20GB', '100Mbps', '3C']) {
+    assert.equal(isNoiseToken(value), false, `meaningful mixed token was filtered: ${value}`)
+  }
+})
+
+test('entity extraction tolerates missing or non-text source fields', () => {
+  assert.doesNotThrow(() => extractEntities(null, undefined, { title: 'not text' }, ['unexpected']))
+  assert.deepEqual(extractEntities(null, undefined, { title: 'not text' }, ['unexpected']), [])
+})
+
+test('malformed request bodies return validation errors instead of throwing', async () => {
+  for (const body of [null, [], 'not-json', '{"query":']) {
+    const response = await new Promise((resolve) => analyzeHandler(
+      { method: 'POST', headers: {}, body },
+      mockResponse(resolve),
+    ))
+    assert.equal(response.status, 400)
+    assert.match(response.body.error, /query 必須/)
+  }
+})
+
+test('returns a stable empty result when SERP has no organic results', async () => {
+  const previousMode = process.env.PUBLIC_TEST_MODE
+  const previousAllowAny = process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+  const previousCooldown = process.env.PUBLIC_TEST_COOLDOWN_MS
+  const previousKey = process.env.SERPAPI_KEY
+  const previousFetch = globalThis.fetch
+  try {
+    process.env.PUBLIC_TEST_MODE = 'true'
+    process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = 'true'
+    process.env.PUBLIC_TEST_COOLDOWN_MS = '0'
+    process.env.SERPAPI_KEY = 'test-key'
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ organic_results: [] }) })
+    const response = await new Promise((resolve) => analyzeHandler(
+      { method: 'POST', headers: {}, body: { query: '沒有結果的測試' } },
+      mockResponse(resolve),
+    ))
+    assert.equal(response.status, 200)
+    assert.equal(response.body.result.summary.articleCount, 0)
+    assert.deepEqual(response.body.result.articles, [])
+    assert.deepEqual(response.body.result.entities, [])
+    assert.match(response.body.result.notice, /沒有取得/)
+  } finally {
+    if (previousMode === undefined) delete process.env.PUBLIC_TEST_MODE
+    else process.env.PUBLIC_TEST_MODE = previousMode
+    if (previousAllowAny === undefined) delete process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+    else process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = previousAllowAny
+    if (previousCooldown === undefined) delete process.env.PUBLIC_TEST_COOLDOWN_MS
+    else process.env.PUBLIC_TEST_COOLDOWN_MS = previousCooldown
+    if (previousKey === undefined) delete process.env.SERPAPI_KEY
+    else process.env.SERPAPI_KEY = previousKey
+    globalThis.fetch = previousFetch
+  }
+})
+
+test('keeps article rows when individual source fetches fail', async () => {
+  const previousMode = process.env.PUBLIC_TEST_MODE
+  const previousAllowAny = process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+  const previousCooldown = process.env.PUBLIC_TEST_COOLDOWN_MS
+  const previousKey = process.env.SERPAPI_KEY
+  const previousFetch = globalThis.fetch
+  try {
+    process.env.PUBLIC_TEST_MODE = 'true'
+    process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = 'true'
+    process.env.PUBLIC_TEST_COOLDOWN_MS = '0'
+    process.env.SERPAPI_KEY = 'test-key'
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://serpapi.com/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ organic_results: [
+            { position: 1, link: 'https://8.8.8.8/first', title: '第一篇', snippet: '' },
+            { position: 2, link: 'https://8.8.8.8/second', title: '第二篇', snippet: '' },
+          ] }),
+        }
+      }
+      if (url.endsWith('/first')) return { ok: false, status: 503 }
+      throw new Error('source offline')
+    }
+    const response = await new Promise((resolve) => analyzeHandler(
+      { method: 'POST', headers: {}, body: { query: '來源失敗測試' } },
+      mockResponse(resolve),
+    ))
+    assert.equal(response.status, 200)
+    assert.equal(response.body.result.summary.articleCount, 2)
+    assert.equal(response.body.result.articles.length, 2)
+    assert.equal(response.body.result.articles.every((article) => article.entityCount >= 0), true)
+    assert.equal(response.body.result.articles.some((article) => article.fetchStatus !== 'ok'), true)
+  } finally {
+    if (previousMode === undefined) delete process.env.PUBLIC_TEST_MODE
+    else process.env.PUBLIC_TEST_MODE = previousMode
+    if (previousAllowAny === undefined) delete process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+    else process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = previousAllowAny
+    if (previousCooldown === undefined) delete process.env.PUBLIC_TEST_COOLDOWN_MS
+    else process.env.PUBLIC_TEST_COOLDOWN_MS = previousCooldown
+    if (previousKey === undefined) delete process.env.SERPAPI_KEY
+    else process.env.SERPAPI_KEY = previousKey
+    globalThis.fetch = previousFetch
+  }
+})
+
 test('history route rejects unauthenticated requests', async () => {
   const response = await new Promise((resolve) => historyHandler(
     { method: 'GET', headers: {} },

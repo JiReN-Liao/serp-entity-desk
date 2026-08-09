@@ -17,12 +17,15 @@ const STOPWORDS = new Set([
   '首頁', '目錄', '網站', '網頁', '頁面', '本文', '全文', '閱讀', '閱讀全文', '分享', '收藏', '訂閱', '登入',
   '註冊', '搜尋', '查看', '點擊', '繼續', '返回', '上一頁', '下一頁', '載入', '錯誤', '選單', '留言', '評論',
   '作者', '日期', '時間', '更新', '版權', '隱私', '條款', '聯絡', '關於', '推薦', '立即', '更多資訊',
+  '熱門', '熱門文章', '最新消息', '相關文章', '延伸閱讀', '導覽', '導覽列', '標籤', '分類', '頁碼', '回到頂端',
+  '按讚', '轉發', '複製', '下載', '列印', '播放', '圖片', '影片',
   'the', 'and', 'for', 'with', 'from', 'that', 'this', 'your', 'you', 'are', 'was', 'will', 'have',
   'about', 'into', 'than', 'then', 'when', 'where', 'what', 'which', 'how', 'not', 'our', 'their',
   'https', 'http', 'www', 'com', 'net', 'org', 'html', 'htm', 'php', 'css', 'js', 'json', 'xml', 'svg',
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'cookie', 'cookies', 'share', 'login', 'logout', 'signup', 'search',
   'menu', 'header', 'footer', 'sidebar', 'related', 'recommend', 'comment', 'comments', 'page', 'next', 'prev',
-  'previous', 'loading', 'error', 'home', 'url', 'utm', 'amp', 'api',
+  'previous', 'loading', 'error', 'home', 'url', 'utm', 'amp', 'api', 'breadcrumb', 'social', 'print', 'download',
+  'pagination', 'tag', 'tags', 'category', 'categories', 'filter', 'sort', 'back', 'top', 'subscribe',
 ])
 
 const TOPIC_RULES = [
@@ -40,8 +43,12 @@ function env(name, fallback = '') {
 }
 
 function getHeader(req, name) {
-  const value = req.headers?.[name.toLowerCase()]
+  const value = req?.headers?.[name.toLowerCase()]
   return Array.isArray(value) ? value[0] : value
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function publicClientKey(req) {
@@ -82,21 +89,52 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
 }
 
 function parseBody(req) {
-  if (!req.body) return {}
-  if (typeof req.body === 'object') return req.body
+  const rawBody = req?.body
+  if (!rawBody) return {}
+  if (isRecord(rawBody)) return rawBody
+  if (typeof rawBody !== 'string') return {}
   try {
-    return JSON.parse(req.body)
+    const parsed = JSON.parse(rawBody)
+    return isRecord(parsed) ? parsed : {}
   } catch {
     return {}
   }
 }
 
 function safeSource(link, fallback = '未知來源') {
+  if (typeof link !== 'string') return fallback
   try {
     return new URL(link).hostname.replace(/^www\./, '')
   } catch {
     return fallback
   }
+}
+
+function normalizePublicHttpUrl(value) {
+  if (typeof value !== 'string') return ''
+  try {
+    const parsed = new URL(value.trim())
+    if (!['http:', 'https:'].includes(parsed.protocol)) return ''
+    return parsed.toString()
+  } catch {
+    return ''
+  }
+}
+
+function safePositiveInteger(value, fallback) {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function normalizeLocale(value, fallback) {
+  const normalized = normalizeText(value).toLowerCase()
+  return /^[a-z]{2,3}(?:-[a-z]{2,4})?$/.test(normalized) ? normalized : fallback
+}
+
+function requestTimeoutMs() {
+  const configured = Number(env('REQUEST_TIMEOUT_MS', DEFAULT_TIMEOUT_MS))
+  if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_TIMEOUT_MS
+  return Math.min(Math.floor(configured), 20_000)
 }
 
 function isPrivateIp(address) {
@@ -148,7 +186,11 @@ async function isSafePublicUrl(value) {
 }
 
 function normalizeText(value) {
-  return String(value || '')
+  const raw = typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint'
+    ? String(value)
+    : ''
+  return raw
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff]/g, ' ')
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -177,6 +219,9 @@ function isNoiseToken(value) {
   const normalized = String(value || '').trim()
   if (!normalized || isNumericLikeToken(normalized) || isStopword(normalized)) return true
   if (/^v?\d+(?:[._/-]\d+)+$/i.test(normalized)) return true
+  if (/^\d{2,4}年(?:\d{1,2}月(?:\d{1,2}日?)?)?$/u.test(normalized)) return true
+  if (/^\d+(?:[.,/-]\d+)*(?:年|月|日|號|元|塊|折|期|次|個|件|人|名|篇|頁|歲|天|週|周|小時|分鐘|分|秒|%|％)$/u.test(normalized)) return true
+  if (/^第?\d+(?:名|位|項|題|頁|章|段|條|筆|篇)$/u.test(normalized)) return true
   if (/^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(normalized)) return true
   return false
 }
@@ -194,14 +239,18 @@ function addChineseCandidates(text, candidateSet) {
   }
 
   if (typeof Intl.Segmenter === 'function') {
-    const segmenter = new Intl.Segmenter('zh-TW', { granularity: 'word' })
-    for (const segment of segmenter.segment(text)) {
-      const value = normalizeText(segment.segment)
-      if (segment.isWordLike && /[\u3400-\u9fff]/.test(value) && value.length >= 3 && !isNoiseToken(value)) {
-        candidateSet.add(value)
+    try {
+      const segmenter = new Intl.Segmenter('zh-TW', { granularity: 'word' })
+      for (const segment of segmenter.segment(text)) {
+        const value = normalizeText(segment.segment)
+        if (segment.isWordLike && /[\u3400-\u9fff]/.test(value) && value.length >= 3 && !isNoiseToken(value)) {
+          candidateSet.add(value)
+        }
       }
+      return
+    } catch {
+      // Fall back to contiguous CJK runs when a runtime lacks the locale data.
     }
-    return
   }
 
   const runs = text.match(/[\u3400-\u9fff]{3,12}/g) || []
@@ -224,9 +273,12 @@ function addLatinCandidates(text, candidateSet) {
 }
 
 function extractEntities(query, title, snippet, articleText) {
-  const text = normalizeText(`${query} ${title} ${snippet} ${articleText}`).slice(0, 50000)
-  const candidateSet = new Set()
   const normalizedQuery = normalizeText(query)
+  const normalizedTitle = normalizeText(title)
+  const normalizedSnippet = normalizeText(snippet)
+  const normalizedArticleText = normalizeText(articleText)
+  const text = normalizeText(`${normalizedQuery} ${normalizedTitle} ${normalizedSnippet} ${normalizedArticleText}`).slice(0, 50000)
+  const candidateSet = new Set()
   if (normalizedQuery.length >= 2 && normalizedQuery.length <= 30 && !isNoiseToken(normalizedQuery)) {
     candidateSet.add(normalizedQuery)
   }
@@ -236,7 +288,7 @@ function extractEntities(query, title, snippet, articleText) {
   const scored = [...candidateSet]
     .map((name) => {
       const frequency = occurrenceCount(text, name)
-      const inTitle = title.toLowerCase().includes(name.toLowerCase())
+      const inTitle = normalizedTitle.toLowerCase().includes(name.toLowerCase())
       const knownTopic = classifyTopic(name) !== '其他'
       const score = frequency * 4 + (inTitle ? 6 : 0) + (knownTopic ? 4 : 0) + Math.min(name.length, 8) / 10
       return { name, frequency, score, topic: classifyTopic(name) }
@@ -255,16 +307,18 @@ function extractEntities(query, title, snippet, articleText) {
 }
 
 async function fetchArticle(link) {
-  const safety = await isSafePublicUrl(link)
+  const normalizedLink = normalizePublicHttpUrl(link)
+  if (!normalizedLink) return { text: '', fetchStatus: 'URL 無效', error: '來源 URL 無效' }
+  const safety = await isSafePublicUrl(normalizedLink)
   if (!safety.safe) return { text: '', fetchStatus: 'blocked', error: safety.reason }
   try {
-    const response = await fetchWithTimeout(link, {
+    const response = await fetchWithTimeout(normalizedLink, {
       headers: {
         'User-Agent': 'SERP-Entity-Desk/0.1 (+https://vercel.com)',
         Accept: 'text/html,application/xhtml+xml',
       },
       redirect: 'follow',
-    }, Number(env('REQUEST_TIMEOUT_MS', DEFAULT_TIMEOUT_MS)))
+    }, requestTimeoutMs())
     if (!response.ok) return { text: '', fetchStatus: `HTTP ${response.status}`, error: `來源回傳 ${response.status}` }
     const contentType = response.headers.get('content-type') || ''
     if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml')) {
@@ -294,13 +348,27 @@ async function searchSerpApi(query, gl, hl) {
   url.searchParams.set('engine', 'google')
   url.searchParams.set('q', query)
   url.searchParams.set('num', String(MAX_ARTICLES))
-  url.searchParams.set('gl', gl || 'tw')
-  url.searchParams.set('hl', hl || 'zh-tw')
+  url.searchParams.set('gl', normalizeLocale(gl, 'tw'))
+  url.searchParams.set('hl', normalizeLocale(hl, 'zh-tw'))
   url.searchParams.set('api_key', apiKey)
-  const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, Number(env('REQUEST_TIMEOUT_MS', DEFAULT_TIMEOUT_MS)))
+  const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, requestTimeoutMs())
   const payload = await response.json().catch(() => ({}))
+  if (!isRecord(payload)) throw new Error('SerpApi 回傳格式無法解析。')
   if (!response.ok || payload.error) throw new Error(payload.error || `SerpApi 回傳 ${response.status}`)
-  return (payload.organic_results || []).filter((item) => item.link).slice(0, MAX_ARTICLES)
+  return (Array.isArray(payload.organic_results) ? payload.organic_results : [])
+    .map((item, index) => {
+      const link = normalizePublicHttpUrl(item?.link)
+      if (!link) return null
+      return {
+        link,
+        title: normalizeText(item.title) || '未命名文章',
+        snippet: normalizeText(item.snippet),
+        source: normalizeText(item.source),
+        position: safePositiveInteger(item.position, index + 1),
+      }
+    })
+    .filter(Boolean)
+    .slice(0, MAX_ARTICLES)
 }
 
 function aggregate(articles) {
@@ -329,7 +397,7 @@ function aggregate(articles) {
 }
 
 async function verifyUser(authorization) {
-  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
+  const token = typeof authorization === 'string' ? authorization.match(/^Bearer\s+(.+)$/i)?.[1] : null
   if (!token) return null
   const url = env('SUPABASE_URL')
   const anonKey = env('SUPABASE_ANON_KEY')
@@ -344,41 +412,59 @@ async function persistResult(result, userId) {
   const url = env('SUPABASE_URL')
   const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY')
   if (!url || !serviceKey || !userId) return { persisted: false }
-  const client = createClient(url, serviceKey)
-  const { error } = await client.from('analysis_runs').insert({
-    user_id: userId,
-    query: result.query,
-    source: result.source,
-    mode: result.mode,
-    article_count: result.summary.articleCount,
-    entity_count: result.summary.entityCount,
-    cluster_count: result.summary.clusterCount,
-    payload: result,
-  })
-  if (error) {
-    console.error('Supabase persistence failed:', error.message)
+  try {
+    const client = createClient(url, serviceKey)
+    const { error } = await client.from('analysis_runs').insert({
+      user_id: userId,
+      query: result.query,
+      source: result.source,
+      mode: result.mode,
+      article_count: result.summary.articleCount,
+      entity_count: result.summary.entityCount,
+      cluster_count: result.summary.clusterCount,
+      payload: result,
+    })
+    if (error) {
+      console.error('Supabase persistence failed:', error.message)
+      return { persisted: false, persistenceError: 'Supabase 保存失敗，結果仍已回傳' }
+    }
+    return { persisted: true }
+  } catch (error) {
+    console.error('Supabase persistence failed:', error?.message || error)
     return { persisted: false, persistenceError: 'Supabase 保存失敗，結果仍已回傳' }
   }
-  return { persisted: true }
 }
 
 async function analyze(query, gl, hl) {
   const serpResults = await searchSerpApi(query, gl, hl)
-  const articles = await Promise.all(serpResults.map(async (item) => {
-    const title = normalizeText(item.title || '未命名文章')
-    const snippet = normalizeText(item.snippet || '')
-    const fetched = await fetchArticle(item.link)
-    const entities = extractEntities(query, title, snippet, fetched.text)
-    return {
-      position: item.position || 0,
+  const articles = await Promise.all(serpResults.map(async (item, index) => {
+    const title = normalizeText(item.title) || '未命名文章'
+    const snippet = normalizeText(item.snippet)
+    const link = normalizePublicHttpUrl(item.link)
+    const fallback = {
+      position: safePositiveInteger(item.position, index + 1),
       title,
-      source: item.source || safeSource(item.link),
-      link: item.link,
+      source: normalizeText(item.source) || safeSource(link),
+      link,
       snippet,
-      fetchStatus: fetched.fetchStatus,
-      fetchError: fetched.error || null,
-      entityCount: entities.length,
-      entities,
+      fetchStatus: '分析失敗',
+      fetchError: '文章處理失敗，已略過此來源正文。',
+      entityCount: 0,
+      entities: [],
+    }
+    try {
+      const fetched = await fetchArticle(link)
+      const entities = extractEntities(query, title, snippet, fetched.text)
+      return {
+        ...fallback,
+        fetchStatus: fetched.fetchStatus,
+        fetchError: fetched.error || null,
+        entityCount: entities.length,
+        entities,
+      }
+    } catch (error) {
+      console.error('Article analysis failed:', error?.message || error)
+      return fallback
     }
   }))
   const { entities, clusters } = aggregate(articles)
@@ -387,7 +473,9 @@ async function analyze(query, gl, hl) {
     source: 'serpapi',
     mode: 'live',
     createdAt: new Date().toISOString(),
-    notice: 'entity 為文章標題、摘要與可取得正文的規則式候選；文章不可抓取時會保留狀態，不靜默補資料。',
+    notice: articles.length
+      ? 'entity 為文章標題、摘要與可取得正文的規則式候選；文章不可抓取時會保留狀態，不靜默補資料。'
+      : '這次搜尋沒有取得 Google organic results；可以換一組更具體的關鍵字再試。',
     summary: {
       articleCount: articles.length,
       entityCount: entities.length,
@@ -406,7 +494,13 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: '只接受 POST。' })
 
   const body = parseBody(req)
-  if (JSON.stringify(body).length > 5000) return json(res, 413, { error: 'request body 過大。' })
+  let serializedBody = ''
+  try {
+    serializedBody = JSON.stringify(body)
+  } catch {
+    return json(res, 400, { error: 'request body 格式無法解析。' })
+  }
+  if (serializedBody.length > 5000) return json(res, 413, { error: 'request body 過大。' })
   const query = normalizeText(body.query)
   if (!query || query.length > MAX_QUERY_LENGTH) return json(res, 400, { error: `query 必須是 1–${MAX_QUERY_LENGTH} 字元。` })
 
@@ -450,7 +544,15 @@ export default async function handler(req, res) {
     return json(res, 200, { result: { ...result, persistence } })
   } catch (error) {
     console.error('SERP Entity analysis failed:', error)
-    return json(res, 502, { error: error.message || 'SERP 分析失敗，請稍後再試。' })
+    const message = String(error?.message || '')
+    const publicMessage = /aborted|abort|timeout|timed out|逾時/i.test(message)
+      ? '搜尋服務回應逾時，請稍後再試。'
+      : /429|rate limit|too many requests|請求過於頻繁/i.test(message)
+        ? '搜尋服務目前請求過於頻繁，請稍後再試。'
+        : /fetch failed|network|econn|enotfound|dns/i.test(message)
+          ? '搜尋服務暫時無法連線，請稍後再試。'
+          : message || 'SERP 分析失敗，請稍後再試。'
+    return json(res, 502, { error: publicMessage })
   }
 }
 
