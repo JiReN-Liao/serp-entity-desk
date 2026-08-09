@@ -19,3 +19,9 @@ reproduction, affected route, and impact.
 - Keep service-role credentials in Vercel server-side environment variables.
 - Rotate a token immediately if it has appeared in a commit, log, screenshot,
   or shared spreadsheet.
+- Protect the n8n SEO webhook with `SEO_PROXY_SECRET`; the browser must never
+  receive this value. Only the authenticated Vercel Function adds the proxy
+  header.
+- Treat QuickChart labels as data sent to a third-party image service. Do not
+  place customer secrets, personal data, or confidential product details in
+  SEO generation inputs.

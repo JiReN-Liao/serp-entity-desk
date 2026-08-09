@@ -786,9 +786,7 @@ function ResultView({ result }) {
             {topEntities.length ? topEntities.map((entity) => (
               <div className="bar-row" key={entity.name}>
                 <div className="bar-label"><strong>{entity.name}</strong><span>{entity.articleCount} 篇</span></div>
-                <div className="bar-track" aria-label={`${entity.name} ${entity.totalFrequency} 次`}>
-                  <span className="bar-fill" style={{ width: `${(entity.totalFrequency / maxFrequency) * 100}%` }} />
-                </div>
+                <progress className="bar-track" max={maxFrequency} value={entity.totalFrequency} aria-label={`${entity.name} ${entity.totalFrequency} 次`} />
                 <strong className="bar-value">{entity.totalFrequency}</strong>
               </div>
             )) : <p className="result-empty-copy">這次沒有可展示的 entity，請換一組更具體的關鍵字。</p>}

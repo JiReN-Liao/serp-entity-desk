@@ -1,6 +1,25 @@
 # SERP Entity Desk
 
-第 6 題的可展示 prototype：輸入任意關鍵字，透過 SerpApi 取得 Google 第一頁前 10 筆，抓取可讀文章內容，產生逐篇 entity 候選數量與主題分群，並以 Vercel Function、Supabase Auth／資料表及 Apps Script 匯出到 Google Sheet。
+零一筆試第 6、7 題的正式展示站。第 6 題分析 SERP entity；第 7 題透過登入保護的 Vercel Function 將輸入送到 self-host n8n，再由 Gemini 建立 SEO 初稿、三點改善、約 1,800 字修正版與三張資訊圖。
+
+## 第 7 題正式流程
+
+正式頁面：<https://serp-entity-desk.vercel.app/seo-tool>
+
+```text
+登入頁 → /seo-tool → /api/seo-generate → 受密鑰保護的 Tunnel
+      → self-host n8n → Gemini structured JSON → QuickChart
+      → Vercel 回應契約與品質重算 → 初稿／改善／修正版
+```
+
+第 7 題的安全與品質邊界：
+
+- Supabase session 會在 Vercel server 重新驗證；瀏覽器不能直接取得 n8n webhook 密鑰。
+- Tunnel webhook 要求 `SEO_PROXY_SECRET`，避免繞過登入直接消耗 Gemini 額度。
+- Vercel 不直接信任 workflow 的 `PASS`：會重新計算 1,750–2,100 字、三張圖、三個位置、三點改善、輸入覆蓋、圖片差異與內容宣稱。
+- 只接受 `https://quickchart.io` 圖片 URL；異常或不完整回應會轉成可讀錯誤，不交給 React 直接渲染。
+- 頁面可查看 Gemini 初稿、三點修改、修正版、實際圖片位置與每項品質檢查，並可複製或下載 Markdown。
+- `target_folder_key` 是可追蹤的邏輯路由，不冒充 Google Drive 寫入；資訊圖資料會送到 QuickChart，不應輸入機密資料。
 
 ## 最小交付與誠實邊界
 
@@ -22,6 +41,7 @@
    - Auth 開啟 Email／Password；若開啟 email confirmation，註冊後要先收信確認。
    - 在 Authentication → URL Configuration 將 Site URL 設為 `https://serp-entity-desk.vercel.app`，Redirect URLs 至少加入同一個網址，讓註冊驗證與忘記密碼連結能回到正式站。
 4. Apps Script（可選）：在 Script Properties 設定 `SERP_ENTITY_ENDPOINT` 與 `SERP_ENTITY_API_TOKEN`，再執行 `apps-script/Code.gs` 的 `setupSheet`。
+5. 第 7 題 n8n：`N8N_SEO_WEBHOOK_URL` 與同一組 `SEO_PROXY_SECRET`。Gemini key 只放在 n8n credential／容器環境，不放 Vercel 或前端。
 
 ## 本機執行
 
@@ -61,6 +81,8 @@ npx vercel dev
 - [ ] Supabase `analysis_runs` 只允許使用者讀取自己的 row；服務金鑰不出現在前端。
 - [ ] Apps Script 能把 summary、articles、entities、clusters 寫入不同工作表。
 - [ ] 已登入使用者可在側欄看到自己的最近分析；RLS 不允許讀取其他使用者的 row。
+- [ ] 第 7 題未登入 health／generate API 回傳 401；直接呼叫 Tunnel webhook 且沒有 proxy secret 也回傳 401。
+- [ ] 第 7 題正式頁顯示初稿、三點改善、修正版、三張圖、實際位置與 server 重算的品質檢查。
 
 ## 參考文件
 

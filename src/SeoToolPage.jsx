@@ -7,17 +7,27 @@ const initialForm = {
   target_folder_key: 'formal-site/seo-demo',
 }
 
+const qualityLabels = {
+  article_length: '文章長度',
+  image_count: '三張圖片',
+  image_positions: '圖片位置',
+  improvement_count: '三點改善',
+  input_coverage: '輸入對應',
+  unique_images: '圖片差異',
+  content_claims: '宣稱檢查',
+}
+
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
-function ArticlePreview({ markdown }) {
+function ArticlePreview({ markdown, compact = false }) {
   return String(markdown || '').split('\n').map((line, index) => {
     const image = line.match(/^!\[([^\]]*)\]\((.+)\)$/)
     if (image) return <figure key={`${image[2]}-${index}`}><img src={image[2]} alt={image[1]} loading="lazy" /><figcaption>{image[1]}</figcaption></figure>
     if (line.startsWith('# ')) return <h2 key={index}>{line.slice(2)}</h2>
     if (line.startsWith('## ')) return <h3 key={index}>{line.slice(3)}</h3>
-    return line.trim() ? <p key={index}>{line}</p> : null
+    return line.trim() ? <p className={compact ? 'compact' : undefined} key={index}>{line}</p> : null
   })
 }
 
@@ -28,7 +38,10 @@ export default function SeoToolPage({ session }) {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
   const mounted = useRef(true)
+  const requestController = useRef(null)
+  const resultHeading = useRef(null)
 
   async function checkHealth() {
     try {
@@ -49,8 +62,23 @@ export default function SeoToolPage({ session }) {
   useEffect(() => {
     mounted.current = true
     checkHealth()
-    return () => { mounted.current = false }
+    return () => {
+      mounted.current = false
+      requestController.current?.abort()
+    }
   }, [])
+
+  useEffect(() => {
+    if (!busy) return undefined
+    setElapsed(0)
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000)
+    return () => window.clearInterval(timer)
+  }, [busy])
+
+  useEffect(() => {
+    if (result) resultHeading.current?.focus()
+  }, [result])
 
   async function ensureReady() {
     if (await checkHealth()) return true
@@ -72,6 +100,8 @@ export default function SeoToolPage({ session }) {
     setError('')
     setResult(null)
     setCopied(false)
+    requestController.current?.abort()
+    requestController.current = new AbortController()
     try {
       const ready = await ensureReady()
       if (!ready) throw new Error('n8n 尚未完成喚醒，請一分鐘後再試。')
@@ -82,22 +112,49 @@ export default function SeoToolPage({ session }) {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify(form),
+        signal: requestController.current.signal,
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '產生失敗。')
-      setResult(data)
+      if (mounted.current) {
+        setResult(data)
+      }
     } catch (submitError) {
-      setError(submitError.message || '產生失敗。')
+      if (submitError?.name !== 'AbortError' && mounted.current) setError(submitError.message || '產生失敗。')
     } finally {
-      setBusy(false)
+      if (mounted.current) setBusy(false)
     }
   }
 
   async function copyArticle() {
     if (!result?.revised?.article_markdown) return
-    await navigator.clipboard.writeText(result.revised.article_markdown)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1800)
+    try {
+      await navigator.clipboard.writeText(result.revised.article_markdown)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setError('瀏覽器無法存取剪貼簿，請改用下載 Markdown。')
+    }
+  }
+
+  function downloadArticle() {
+    if (!result?.revised?.article_markdown) return
+    const safeName = form.keyword.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'seo-article'
+    const blob = new Blob([result.revised.article_markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${safeName}.md`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  function resetForm() {
+    requestController.current?.abort()
+    setForm(initialForm)
+    setResult(null)
+    setError('')
+    setBusy(false)
   }
 
   const stateLabel = serviceState === 'ready'
@@ -125,37 +182,39 @@ export default function SeoToolPage({ session }) {
       </section>
 
       <div className="seo-workspace">
-        <form className="seo-form" onSubmit={submit}>
+        <form className="seo-form" onSubmit={submit} aria-busy={busy}>
           <div className="panel-heading"><div><p className="section-label">INPUT</p><h2>文章設定</h2></div><span className="quiet-tag">GEMINI AI</span></div>
-          <label>關鍵字<input value={form.keyword} onChange={(event) => update('keyword', event.target.value)} maxLength="120" required /></label>
-          <label>想賣的產品<input value={form.product} onChange={(event) => update('product', event.target.value)} maxLength="120" required /></label>
-          <label>使用情境<textarea value={form.scenario} onChange={(event) => update('scenario', event.target.value)} maxLength="300" required /></label>
-          <label>資料夾路徑<input value={form.target_folder_key} onChange={(event) => update('target_folder_key', event.target.value)} maxLength="180" required /></label>
+          <label>關鍵字<input value={form.keyword} onChange={(event) => update('keyword', event.target.value)} maxLength="120" autoComplete="off" required /><small>{[...form.keyword].length}/120</small></label>
+          <label>想賣的產品<input value={form.product} onChange={(event) => update('product', event.target.value)} maxLength="120" autoComplete="off" required /><small>{[...form.product].length}/120</small></label>
+          <label>使用情境<textarea value={form.scenario} onChange={(event) => update('scenario', event.target.value)} maxLength="300" required /><small>{[...form.scenario].length}/300</small></label>
+          <label>資料夾路徑<input value={form.target_folder_key} onChange={(event) => update('target_folder_key', event.target.value)} maxLength="180" autoComplete="off" required /><small>邏輯路由，方便區分每次結果</small></label>
           <button className="button primary full-width" type="submit" disabled={busy || serviceState === 'not-configured'}>{busy ? (serviceState === 'ready' ? 'n8n 執行中…' : '等待 n8n 喚醒…') : '產生文章與三張圖'}</button>
+          <button className="text-button seo-reset" type="button" onClick={resetForm} disabled={busy}>重設展示內容</button>
           <p className="seo-form-note">登入後由正式站轉送至 self-host n8n，再呼叫 Gemini。API key 只存在 n8n 環境變數，不會送到瀏覽器。</p>
         </form>
 
         <section className="seo-output" aria-live="polite">
-          {error && <div className="seo-error" role="alert">{error}</div>}
+          {error && <div className="seo-error" role="alert"><strong>這次沒有完成</strong><span>{error}</span><button className="text-button" type="button" onClick={() => setError('')}>關閉提示</button></div>}
           {!error && !result && !busy && <div className="seo-empty"><strong>結果會顯示在這裡</strong><span>文章、三張圖、修改紀錄與資料夾路由會由 n8n 一次回傳。</span></div>}
-          {!error && !result && busy && <div className="seo-progress" role="status"><strong>正在建立內容</strong><span>Gemini 撰寫初稿</span><span>檢查三個改善點</span><span>插入資訊圖並執行品質閘門</span></div>}
+          {!error && !result && busy && <div className="seo-progress" role="status"><strong>正在建立內容</strong><small>已執行 {elapsed} 秒，通常約 15–40 秒完成。</small><span>Gemini 撰寫初稿</span><span>檢查三個改善點</span><span>插入資訊圖並執行品質閘門</span></div>}
           {result && (
             <>
               <div className="seo-result-head">
-                <div><p className="section-label">REVISED ARTICLE</p><h2>{result.revised.title}</h2><p className="seo-description">{result.revised.meta_description}</p></div>
-                <div className="seo-result-actions"><button className="button secondary compact" type="button" onClick={copyArticle}>{copied ? '已複製' : '複製 Markdown'}</button></div>
+                <div><p className="section-label">REVISED ARTICLE</p><h2 ref={resultHeading} tabIndex="-1">{result.revised.title}</h2><p className="seo-description">{result.revised.meta_description}</p></div>
+                <div className="seo-result-actions"><button className="button secondary compact" type="button" onClick={copyArticle}>{copied ? '已複製' : '複製 Markdown'}</button><button className="button secondary compact" type="button" onClick={downloadArticle}>下載 .md</button></div>
                 <div className="seo-meta"><span>{result.generation_method === 'gemini-ai' ? 'Gemini AI' : 'Workflow'}</span><span>{result.revised.char_count} 字</span><span>{result.revised.images.length} 張圖</span><span className={result.quality_gate === 'PASS' ? 'pass' : 'review'}>{result.quality_gate}</span><span>{result.folder_path}</span></div>
                 <div className="seo-position-row" aria-label="圖片實際插入位置">{result.revised.images.map((image, index) => <span key={image.image_id}>圖 {index + 1} · {image.measured_position_percent || image.insert_after_pct}</span>)}</div>
+                <div className="seo-quality-checks" aria-label="品質檢查">{Object.entries(result.quality_checks || {}).map(([key, passed]) => <span className={passed ? 'passed' : 'failed'} key={key}>{passed ? '✓' : '!'} {qualityLabels[key] || key}</span>)}</div>
               </div>
               {result.content_warnings?.length > 0 && <div className="seo-warning"><strong>發布前需人工確認</strong>{result.content_warnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}
               <article className="seo-article"><ArticlePreview markdown={result.revised.article_markdown} /></article>
               <section className="seo-improvements">
                 <h2>觀察後修正的三個地方</h2>
-                <ol>{result.improvements.map((item) => <li key={item.point_no}><strong>{item.observed_issue}</strong><span>{item.fix_action}；{item.result}</span></li>)}</ol>
+                <ol>{result.improvements.map((item) => <li key={item.point_no}><strong>{item.observed_issue}</strong><dl><div><dt>修正</dt><dd>{item.fix_action}</dd></div><div><dt>結果</dt><dd>{item.result}</dd></div></dl></li>)}</ol>
               </section>
               <details className="seo-draft">
-                <summary>查看 Gemini 初稿</summary>
-                <div><p className="seo-description">{result.draft.meta_description}</p><ArticlePreview markdown={result.draft.article_markdown} /></div>
+                <summary>查看 Gemini 初稿 · {result.draft.char_count} 字</summary>
+                <div><p className="seo-description">{result.draft.meta_description}</p><ArticlePreview markdown={result.draft.article_markdown} compact /></div>
               </details>
             </>
           )}

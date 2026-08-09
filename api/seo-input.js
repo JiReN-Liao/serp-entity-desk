@@ -5,8 +5,21 @@ const limits = {
   target_folder_key: 180,
 }
 
+const labels = {
+  keyword: '關鍵字',
+  product: '想賣的產品',
+  scenario: '使用情境',
+}
+
+function cleanText(value) {
+  return typeof value === 'string'
+    ? value.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff]/g, ' ').replace(/\s+/g, ' ').trim()
+    : ''
+}
+
 export function sanitizeFolder(value) {
-  return String(value || 'formal-site/seo-tool')
+  const normalized = typeof value === 'string' ? value : ''
+  return (normalized || 'formal-site/seo-tool')
     .trim()
     .replace(/[^a-zA-Z0-9_./-]/g, '-')
     .replace(/\/{2,}/g, '/')
@@ -15,19 +28,19 @@ export function sanitizeFolder(value) {
 }
 
 export function validateSeoInput(value) {
-  const source = value && typeof value === 'object' ? value : {}
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const fields = ['keyword', 'product', 'scenario']
   for (const field of fields) {
-    const text = String(source[field] || '').trim()
-    if (!text) return { ok: false, error: `缺少欄位：${field}` }
-    if (text.length > limits[field]) return { ok: false, error: `${field} 超過長度限制` }
+    const value = cleanText(source[field])
+    if (!value) return { ok: false, error: `請填寫${labels[field]}。` }
+    if ([...value].length > limits[field]) return { ok: false, error: `${labels[field]}超過 ${limits[field]} 字。` }
   }
   return {
     ok: true,
     value: {
-      keyword: String(source.keyword).trim(),
-      product: String(source.product).trim(),
-      scenario: String(source.scenario).trim(),
+      keyword: cleanText(source.keyword),
+      product: cleanText(source.product),
+      scenario: cleanText(source.scenario),
       target_folder_key: sanitizeFolder(source.target_folder_key),
     },
   }

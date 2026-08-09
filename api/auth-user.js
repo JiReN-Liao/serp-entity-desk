@@ -5,12 +5,19 @@ export async function verifySupabaseUser(req) {
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
   const url = process.env.SUPABASE_URL
   const anonKey = process.env.SUPABASE_ANON_KEY
-  if (!token || !url || !anonKey) return null
+  if (!token || token.length > 4096 || !url || !anonKey) return null
 
   const client = createClient(url, anonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
+    global: {
+      headers: { Authorization: `Bearer ${token}` },
+      fetch: (input, init = {}) => fetch(input, { ...init, signal: AbortSignal.timeout(8000) }),
+    },
   })
-  const { data, error } = await client.auth.getUser()
-  return error ? null : data.user || null
+  try {
+    const { data, error } = await client.auth.getUser()
+    return error ? null : data.user || null
+  } catch {
+    return null
+  }
 }
