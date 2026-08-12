@@ -10,7 +10,7 @@ test('demo mode makes one quota-safe workflow call', async () => {
     return { generation_method: 'workflow' }
   }
   const result = await runSeoWorkflow({ webhookUrl: 'https://example.test', proxySecret: 'secret', payload: { run_mode: 'demo' }, requestedMode: 'demo', caller })
-  assert.deepEqual(calls, [{ mode: 'demo', timeout: 20_000 }])
+  assert.deepEqual(calls, [{ mode: 'demo', timeout: 5_000 }])
   assert.equal(result.fallbackReason, '')
   assert.equal(result.executionPath, 'n8n')
 })
@@ -27,7 +27,7 @@ test('live quota failure automatically retries demo mode', async () => {
     return { generation_method: 'workflow' }
   }
   const result = await runSeoWorkflow({ webhookUrl: 'https://example.test', proxySecret: 'secret', payload: { run_mode: 'live' }, requestedMode: 'live', caller })
-  assert.deepEqual(calls, [{ mode: 'live', timeout: 55_000 }, { mode: 'demo', timeout: 20_000 }])
+  assert.deepEqual(calls, [{ mode: 'live', timeout: 55_000 }, { mode: 'demo', timeout: 5_000 }])
   assert.equal(result.fallbackReason, 'Gemini 額度或頻率限制')
   assert.equal(result.executionPath, 'n8n')
 })

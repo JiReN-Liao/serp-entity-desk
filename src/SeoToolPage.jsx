@@ -166,8 +166,10 @@ export default function SeoToolPage({ session }) {
     requestController.current = new AbortController()
     setCopyError('')
     try {
-      const ready = await ensureReady()
-      if (!ready) throw new Error('n8n 尚未完成喚醒，請一分鐘後再試。')
+      if (form.generation_mode === 'live') {
+        const ready = await ensureReady()
+        if (!ready) throw new Error('n8n 尚未完成喚醒，請一分鐘後再試。')
+      }
       const { response, data } = await requestJson('/api/seo-generate', {
         method: 'POST',
         headers: {
@@ -266,7 +268,7 @@ export default function SeoToolPage({ session }) {
           <label>想賣的產品<input value={form.product} onChange={(event) => update('product', event.target.value)} maxLength="120" autoComplete="off" required /><small>{[...form.product].length}/120</small></label>
           <label>使用情境<textarea value={form.scenario} onChange={(event) => update('scenario', event.target.value)} maxLength="300" required /><small>{[...form.scenario].length}/300</small></label>
           <label>資料夾路徑<input value={form.target_folder_key} onChange={(event) => update('target_folder_key', event.target.value)} maxLength="180" autoComplete="off" required /><small>邏輯路由，方便區分每次結果</small></label>
-          <button className="button primary full-width" type="submit" disabled={busy || serviceState === 'not-configured' || serviceState === 'auth-error'}>{busy ? (serviceState === 'ready' ? 'n8n 執行中…' : '等待 n8n 喚醒…') : form.generation_mode === 'demo' ? '產生演示文章與三張圖' : '使用 Gemini 產生內容'}</button>
+          <button className="button primary full-width" type="submit" disabled={busy || serviceState === 'not-configured' || serviceState === 'auth-error'}>{busy ? (form.generation_mode === 'demo' ? '建立演示內容…' : serviceState === 'ready' ? 'n8n 執行中…' : '等待 n8n 喚醒…') : form.generation_mode === 'demo' ? '產生演示文章與三張圖' : '使用 Gemini 產生內容'}</button>
           <button className="text-button seo-reset" type="button" onClick={resetForm} disabled={busy}>重設展示內容</button>
           <p className="seo-form-note">兩種模式都會實際執行 self-host n8n。只有「即時 AI」會呼叫 Gemini；API key 只存在 n8n 環境變數。</p>
         </form>

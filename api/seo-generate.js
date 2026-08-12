@@ -74,13 +74,13 @@ function emergencyDemo(payload) {
 
 export async function runSeoWorkflow({ webhookUrl, proxySecret, payload, requestedMode, caller = callWorkflow, emergency = emergencyDemo }) {
   try {
-    const data = await caller(webhookUrl, proxySecret, payload, requestedMode === 'live' ? 55_000 : 20_000)
+    const data = await caller(webhookUrl, proxySecret, payload, requestedMode === 'live' ? 55_000 : 5_000)
     return { data, fallbackReason: '', executionPath: 'n8n' }
   } catch (error) {
     if (requestedMode === 'live') {
       const fallbackReason = error?.status === 429 ? 'Gemini 額度或頻率限制' : 'Gemini 暫時未回應'
       try {
-        const data = await caller(webhookUrl, proxySecret, { ...payload, run_mode: 'demo' }, 20_000)
+        const data = await caller(webhookUrl, proxySecret, { ...payload, run_mode: 'demo' }, 5_000)
         return { data, fallbackReason, executionPath: 'n8n' }
       } catch {
         return { data: emergency(payload), fallbackReason: `${fallbackReason}，且 n8n Tunnel 暫時離線`, executionPath: 'vercel-emergency' }
