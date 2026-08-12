@@ -119,7 +119,15 @@ export function normalizeSeoResult(value) {
       keyword,
       product,
       scenario: text(value.scenario, 300),
-      generation_method: value.generation_method === 'gemini-ai' ? 'gemini-ai' : 'workflow',
+      generation_method: value.generation_method === 'gemini-ai'
+        ? 'gemini-ai'
+        : value.generation_method === 'vercel-emergency-composer'
+          ? 'vercel-emergency-composer'
+          : 'workflow',
+      requested_mode: value.requested_mode === 'live' ? 'live' : 'demo',
+      fallback_used: value.fallback_used === true,
+      fallback_reason: text(value.fallback_reason, 240),
+      execution_path: value.execution_path === 'vercel-emergency' ? 'vercel-emergency' : 'n8n',
       status: qualityGate,
       quality_gate: qualityGate,
       quality_checks: checks,

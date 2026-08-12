@@ -5,6 +5,8 @@ const limits = {
   target_folder_key: 180,
 }
 
+const generationModes = new Set(['demo', 'live'])
+
 const labels = {
   keyword: '關鍵字',
   product: '想賣的產品',
@@ -42,6 +44,7 @@ export function validateSeoInput(value) {
       product: cleanText(source.product),
       scenario: cleanText(source.scenario),
       target_folder_key: sanitizeFolder(source.target_folder_key),
+      generation_mode: generationModes.has(source.generation_mode) ? source.generation_mode : 'demo',
     },
   }
 }
