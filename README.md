@@ -17,6 +17,7 @@
 - Supabase session 會在 Vercel server 重新驗證；瀏覽器不能直接取得 n8n webhook 密鑰。
 - Tunnel webhook 要求 `SEO_PROXY_SECRET`，避免繞過登入直接消耗 Gemini 額度。
 - 預設演示模式不呼叫 Gemini；即時 AI 需手動選擇，若額度／頻率或暫時性服務錯誤發生，Vercel 會改跑同一個 n8n 的輸入驅動演示分支。
+- 若 Cloudflare Quick Tunnel 本身離線，Vercel 會使用由公開 n8n Demo node 同步產生的緊急編排器保住操作結果，並標示 `Vercel 緊急演示`；它不會冒充已執行 n8n。
 - Vercel 不直接信任 workflow 的 `PASS`：會重新計算 1,750–2,100 字、三張圖、三個位置、三點改善、輸入覆蓋、圖片差異與內容宣稱。
 - 只接受 `https://quickchart.io` 圖片 URL；異常或不完整回應會轉成可讀錯誤，不交給 React 直接渲染。
 - 頁面可查看 Gemini 初稿、三點修改、修正版、實際圖片位置與每項品質檢查，並可複製或下載 Markdown。

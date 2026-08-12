@@ -12,6 +12,7 @@ test('demo mode makes one quota-safe workflow call', async () => {
   const result = await runSeoWorkflow({ webhookUrl: 'https://example.test', proxySecret: 'secret', payload: { run_mode: 'demo' }, requestedMode: 'demo', caller })
   assert.deepEqual(calls, [{ mode: 'demo', timeout: 20_000 }])
   assert.equal(result.fallbackReason, '')
+  assert.equal(result.executionPath, 'n8n')
 })
 
 test('live quota failure automatically retries demo mode', async () => {
@@ -28,14 +29,18 @@ test('live quota failure automatically retries demo mode', async () => {
   const result = await runSeoWorkflow({ webhookUrl: 'https://example.test', proxySecret: 'secret', payload: { run_mode: 'live' }, requestedMode: 'live', caller })
   assert.deepEqual(calls, [{ mode: 'live', timeout: 55_000 }, { mode: 'demo', timeout: 20_000 }])
   assert.equal(result.fallbackReason, 'Gemini 額度或頻率限制')
+  assert.equal(result.executionPath, 'n8n')
 })
 
-test('demo failure is surfaced without a retry loop', async () => {
+test('demo tunnel failure uses the local emergency composer', async () => {
   let calls = 0
   const caller = async () => {
     calls += 1
     throw new Error('offline')
   }
-  await assert.rejects(() => runSeoWorkflow({ webhookUrl: 'https://example.test', proxySecret: 'secret', payload: { run_mode: 'demo' }, requestedMode: 'demo', caller }))
+  const emergency = () => ({ generation_method: 'vercel-emergency-composer' })
+  const result = await runSeoWorkflow({ webhookUrl: 'https://example.test', proxySecret: 'secret', payload: { run_mode: 'demo' }, requestedMode: 'demo', caller, emergency })
   assert.equal(calls, 1)
+  assert.equal(result.executionPath, 'vercel-emergency')
+  assert.equal(result.fallbackReason, 'n8n Tunnel 暫時離線')
 })

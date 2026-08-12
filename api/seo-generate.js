@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { validateSeoInput } from './seo-input.js'
 import { verifySupabaseUser } from './auth-user.js'
 import { normalizeSeoResult } from './seo-contract.js'
+import { composeQuotaSafeDemo } from './seo-demo-fallback.js'
 
 const recentRequests = new Map()
 const cooldownMs = 20_000
@@ -64,15 +65,28 @@ async function callWorkflow(webhookUrl, proxySecret, payload, timeoutMs) {
   return normalized.data
 }
 
-export async function runSeoWorkflow({ webhookUrl, proxySecret, payload, requestedMode, caller = callWorkflow }) {
+function emergencyDemo(payload) {
+  const raw = composeQuotaSafeDemo({ ...payload, run_mode: 'demo' })?.[0]?.json
+  const normalized = normalizeSeoResult({ ...raw, generation_method: 'vercel-emergency-composer' })
+  if (!normalized.ok) throw new Error(`INVALID_EMERGENCY_RESULT:${normalized.error}`)
+  return normalized.data
+}
+
+export async function runSeoWorkflow({ webhookUrl, proxySecret, payload, requestedMode, caller = callWorkflow, emergency = emergencyDemo }) {
   try {
     const data = await caller(webhookUrl, proxySecret, payload, requestedMode === 'live' ? 55_000 : 20_000)
-    return { data, fallbackReason: '' }
+    return { data, fallbackReason: '', executionPath: 'n8n' }
   } catch (error) {
-    if (requestedMode !== 'live') throw error
-    const fallbackReason = error?.status === 429 ? 'Gemini 額度或頻率限制' : 'Gemini 暫時未回應'
-    const data = await caller(webhookUrl, proxySecret, { ...payload, run_mode: 'demo' }, 20_000)
-    return { data, fallbackReason }
+    if (requestedMode === 'live') {
+      const fallbackReason = error?.status === 429 ? 'Gemini 額度或頻率限制' : 'Gemini 暫時未回應'
+      try {
+        const data = await caller(webhookUrl, proxySecret, { ...payload, run_mode: 'demo' }, 20_000)
+        return { data, fallbackReason, executionPath: 'n8n' }
+      } catch {
+        return { data: emergency(payload), fallbackReason: `${fallbackReason}，且 n8n Tunnel 暫時離線`, executionPath: 'vercel-emergency' }
+      }
+    }
+    return { data: emergency(payload), fallbackReason: 'n8n Tunnel 暫時離線', executionPath: 'vercel-emergency' }
   }
 }
 
@@ -125,7 +139,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { data, fallbackReason } = await runSeoWorkflow({ webhookUrl, proxySecret, payload, requestedMode })
+    const { data, fallbackReason, executionPath } = await runSeoWorkflow({ webhookUrl, proxySecret, payload, requestedMode })
     res.setHeader('x-request-id', requestId)
     return res.status(200).json({
       ...data,
@@ -133,6 +147,7 @@ export default async function handler(req, res) {
       requested_mode: requestedMode,
       fallback_used: Boolean(fallbackReason),
       fallback_reason: fallbackReason,
+      execution_path: executionPath,
     })
   } catch (error) {
     console.error('SEO workflow proxy failed:', error?.message || error)
