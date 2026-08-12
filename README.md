@@ -1,6 +1,6 @@
 # SERP Entity Desk
 
-零一筆試第 6、7 題的正式展示站。第 6 題分析 SERP entity；第 7 題透過登入保護的 Vercel Function 將輸入送到 self-host n8n，再由 Gemini 建立 SEO 初稿、三點改善、約 1,800 字修正版與三張資訊圖。
+零一筆試第 6、7 題的正式展示站。第 6 題分析 SERP entity；第 7 題透過登入保護的 Vercel Function 將輸入送到 self-host n8n，預設用不耗 LLM 額度的輸入驅動模式建立初稿、三點改善、約 1,800 字修正版與三張資訊圖；需要時才手動切換 Gemini。
 
 ## 第 7 題正式流程
 
@@ -8,7 +8,7 @@
 
 ```text
 登入頁 → /seo-tool → /api/seo-generate → 受密鑰保護的 Tunnel
-      → self-host n8n → Gemini structured JSON → QuickChart
+      → self-host n8n → Demo composer 或 Gemini structured JSON → QuickChart
       → Vercel 回應契約與品質重算 → 初稿／改善／修正版
 ```
 
@@ -16,9 +16,11 @@
 
 - Supabase session 會在 Vercel server 重新驗證；瀏覽器不能直接取得 n8n webhook 密鑰。
 - Tunnel webhook 要求 `SEO_PROXY_SECRET`，避免繞過登入直接消耗 Gemini 額度。
+- 預設演示模式不呼叫 Gemini；即時 AI 需手動選擇，若額度／頻率或暫時性服務錯誤發生，Vercel 會改跑同一個 n8n 的輸入驅動演示分支。
 - Vercel 不直接信任 workflow 的 `PASS`：會重新計算 1,750–2,100 字、三張圖、三個位置、三點改善、輸入覆蓋、圖片差異與內容宣稱。
 - 只接受 `https://quickchart.io` 圖片 URL；異常或不完整回應會轉成可讀錯誤，不交給 React 直接渲染。
 - 頁面可查看 Gemini 初稿、三點修改、修正版、實際圖片位置與每項品質檢查，並可複製或下載 Markdown。
+- 頁面會誠實標示「輸入驅動演示」或「Gemini 即時 AI」；自動降級也會顯示原因，不把規則式內容冒充 AI。
 - `target_folder_key` 是可追蹤的邏輯路由，不冒充 Google Drive 寫入；資訊圖資料會送到 QuickChart，不應輸入機密資料。
 
 ## 最小交付與誠實邊界

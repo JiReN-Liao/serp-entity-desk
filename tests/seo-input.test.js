@@ -9,6 +9,7 @@ test('validates and normalizes SEO workflow input', () => {
     product: ' 顧問服務 ',
     scenario: ' 三人電商團隊 ',
     target_folder_key: '/review/正式 站//case-01/',
+    generation_mode: 'live',
   })
   assert.equal(result.ok, true)
   assert.deepEqual(result.value, {
@@ -16,6 +17,7 @@ test('validates and normalizes SEO workflow input', () => {
     product: '顧問服務',
     scenario: '三人電商團隊',
     target_folder_key: 'review/----/case-01',
+    generation_mode: 'live',
   })
 })
 
@@ -31,6 +33,12 @@ test('rejects non-string and overlong values without coercing objects', () => {
   assert.equal(validateSeoInput({ keyword: {}, product: '服務', scenario: '情境' }).ok, false)
   assert.equal(validateSeoInput({ keyword: '字'.repeat(121), product: '服務', scenario: '情境' }).error, '關鍵字超過 120 字。')
   assert.equal(sanitizeFolder({ path: 'unsafe' }), 'formal-site/seo-tool')
+})
+
+test('defaults to quota-safe demo mode and rejects unknown modes', () => {
+  const base = { keyword: 'SEO', product: '顧問', scenario: '小型團隊' }
+  assert.equal(validateSeoInput(base).value.generation_mode, 'demo')
+  assert.equal(validateSeoInput({ ...base, generation_mode: 'unknown' }).value.generation_mode, 'demo')
 })
 
 test('removes invisible control characters from input', () => {

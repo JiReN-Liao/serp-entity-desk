@@ -5,6 +5,7 @@ const initialForm = {
   product: '內容行銷顧問服務',
   scenario: '沒有專職編輯、每週只有三小時的小型電商',
   target_folder_key: 'formal-site/seo-demo',
+  generation_mode: 'demo',
 }
 
 const qualityLabels = {
@@ -249,26 +250,38 @@ export default function SeoToolPage({ session }) {
 
       <div className="seo-workspace">
         <form className="seo-form" onSubmit={submit} aria-busy={busy}>
-          <div className="panel-heading"><div><p className="section-label">INPUT</p><h2>文章設定</h2></div><span className="quiet-tag">GEMINI AI</span></div>
+          <div className="panel-heading"><div><p className="section-label">INPUT</p><h2>文章設定</h2></div><span className="quiet-tag">N8N WORKFLOW</span></div>
+          <fieldset className="seo-mode-fieldset">
+            <legend>產生模式</legend>
+            <label className={form.generation_mode === 'demo' ? 'selected' : ''}>
+              <input type="radio" name="generation_mode" value="demo" checked={form.generation_mode === 'demo'} onChange={(event) => update('generation_mode', event.target.value)} />
+              <span><strong>演示模式</strong><small>預設推薦，不消耗 Gemini 額度；依輸入重新編排文章與圖表。</small></span>
+            </label>
+            <label className={form.generation_mode === 'live' ? 'selected' : ''}>
+              <input type="radio" name="generation_mode" value="live" checked={form.generation_mode === 'live'} onChange={(event) => update('generation_mode', event.target.value)} />
+              <span><strong>即時 AI</strong><small>需要時才使用 Gemini；若額度或服務異常，會自動降級為演示模式。</small></span>
+            </label>
+          </fieldset>
           <label>關鍵字<input value={form.keyword} onChange={(event) => update('keyword', event.target.value)} maxLength="120" autoComplete="off" required /><small>{[...form.keyword].length}/120</small></label>
           <label>想賣的產品<input value={form.product} onChange={(event) => update('product', event.target.value)} maxLength="120" autoComplete="off" required /><small>{[...form.product].length}/120</small></label>
           <label>使用情境<textarea value={form.scenario} onChange={(event) => update('scenario', event.target.value)} maxLength="300" required /><small>{[...form.scenario].length}/300</small></label>
           <label>資料夾路徑<input value={form.target_folder_key} onChange={(event) => update('target_folder_key', event.target.value)} maxLength="180" autoComplete="off" required /><small>邏輯路由，方便區分每次結果</small></label>
-          <button className="button primary full-width" type="submit" disabled={busy || serviceState === 'not-configured' || serviceState === 'auth-error'}>{busy ? (serviceState === 'ready' ? 'n8n 執行中…' : '等待 n8n 喚醒…') : '產生文章與三張圖'}</button>
+          <button className="button primary full-width" type="submit" disabled={busy || serviceState === 'not-configured' || serviceState === 'auth-error'}>{busy ? (serviceState === 'ready' ? 'n8n 執行中…' : '等待 n8n 喚醒…') : form.generation_mode === 'demo' ? '產生演示文章與三張圖' : '使用 Gemini 產生內容'}</button>
           <button className="text-button seo-reset" type="button" onClick={resetForm} disabled={busy}>重設展示內容</button>
-          <p className="seo-form-note">登入後由正式站轉送至 self-host n8n，再呼叫 Gemini。API key 只存在 n8n 環境變數，不會送到瀏覽器。</p>
+          <p className="seo-form-note">兩種模式都會實際執行 self-host n8n。只有「即時 AI」會呼叫 Gemini；API key 只存在 n8n 環境變數。</p>
         </form>
 
         <section className="seo-output" aria-live="polite" aria-busy={busy}>
           {error && <div className="seo-error" role="alert"><strong>這次沒有完成</strong><span>{error}</span><button className="text-button" type="button" onClick={() => setError('')}>關閉提示</button></div>}
           {!error && !result && !busy && <div className="seo-empty"><strong>結果會顯示在這裡</strong><span>文章、三張圖、修改紀錄與資料夾路由會由 n8n 一次回傳。</span></div>}
-          {!error && !result && busy && <div className="seo-progress" role="status"><strong>正在建立內容</strong><small>已執行 {elapsed} 秒，通常約 15–40 秒完成。</small><span>Gemini 撰寫初稿</span><span>檢查三個改善點</span><span>插入資訊圖並執行品質閘門</span></div>}
+          {!error && !result && busy && <div className="seo-progress" role="status"><strong>正在建立內容</strong><small>已執行 {elapsed} 秒。演示模式通常數秒完成，即時 AI 約需 15–40 秒。</small><span>{form.generation_mode === 'demo' ? '依輸入選擇內容策略' : 'Gemini 撰寫初稿'}</span><span>建立三個改善點</span><span>插入資訊圖並執行品質閘門</span></div>}
           {result && (
             <>
               <div className="seo-result-head">
                 <div><p className="section-label">REVISED ARTICLE</p><h2 ref={resultHeading} tabIndex="-1">{result.revised.title}</h2><p className="seo-description">{result.revised.meta_description}</p></div>
                 <div className="seo-result-actions"><button className="button secondary compact" type="button" onClick={copyArticle}>{copied ? '已複製' : '複製 Markdown'}</button><button className="button secondary compact" type="button" onClick={downloadArticle}>下載 .md</button>{copyError && <span className="seo-copy-error" role="status">{copyError}</span>}</div>
-                <div className="seo-meta"><span>{result.generation_method === 'gemini-ai' ? 'Gemini AI' : 'Workflow'}</span><span>{result.revised.char_count} 字</span><span>{result.revised.images.length} 張圖</span><span className={result.quality_gate === 'PASS' ? 'pass' : 'review'}>{result.quality_gate}</span><span>{result.folder_path}</span></div>
+                {result.fallback_used && <div className="seo-fallback" role="status"><strong>已保住演示結果</strong><span>{result.fallback_reason}，系統已自動改用不耗額度的輸入驅動模式。</span></div>}
+                <div className="seo-meta"><span>{result.generation_method === 'gemini-ai' ? 'Gemini 即時 AI' : '輸入驅動演示'}</span><span>{result.revised.char_count} 字</span><span>{result.revised.images.length} 張圖</span><span className={result.quality_gate === 'PASS' ? 'pass' : 'review'}>{result.quality_gate}</span><span>{result.folder_path}</span></div>
                 <div className="seo-position-row" aria-label="圖片實際插入位置">{result.revised.images.map((image, index) => <span key={image.image_id}>圖 {index + 1} · {image.measured_position_percent || image.insert_after_pct}</span>)}</div>
                 <div className="seo-quality-checks" aria-label="品質檢查">{Object.entries(result.quality_checks || {}).map(([key, passed]) => <span className={passed ? 'passed' : 'failed'} key={key}>{passed ? '✓' : '!'} {qualityLabels[key] || key}</span>)}</div>
               </div>
@@ -281,7 +294,7 @@ export default function SeoToolPage({ session }) {
                   : <li><strong>尚未收到改善紀錄</strong><span>請在發布前人工確認內容與 workflow 回傳。</span></li>}</ol>
               </section>
               <details className="seo-draft">
-                <summary>查看 Gemini 初稿 · {result.draft.char_count} 字</summary>
+                <summary>查看初稿 · {result.draft.char_count} 字</summary>
                 <div><p className="seo-description">{result.draft.meta_description}</p><ArticlePreview markdown={result.draft.article_markdown} compact /></div>
               </details>
             </>

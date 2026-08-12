@@ -26,6 +26,8 @@ function resultFixture(overrides = {}) {
     product: '內容',
     scenario: '測試情境',
     generation_method: 'gemini-ai',
+    requested_mode: 'live',
+    fallback_used: false,
     folder_path: 'review/test/revised/',
     draft: { version: 'draft', title: '初稿', meta_description: '說明', article_markdown: '初稿內容' },
     revised: { version: 'revised', title: '修正版', meta_description: '說明', article_markdown: article, images },
@@ -43,6 +45,8 @@ test('normalizes a complete workflow response and recomputes PASS', () => {
   assert.equal(result.data.quality_checks.image_positions, true)
   assert.equal(result.data.quality_checks.input_coverage, true)
   assert.equal(result.data.quality_checks.unique_images, true)
+  assert.equal(result.data.requested_mode, 'live')
+  assert.equal(result.data.fallback_used, false)
 })
 
 test('rejects unsafe image origins', () => {
