@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { normalizeSeoResult } from '../api/seo-contract.js'
 
 const initialForm = {
   keyword: '台灣小型品牌內容行銷',
@@ -31,7 +32,9 @@ function safeImageUrl(value) {
   if (typeof value !== 'string') return ''
   try {
     const parsed = new URL(value)
-    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString() : ''
+    return parsed.protocol === 'https:' && parsed.hostname === 'quickchart.io' && !parsed.username && !parsed.password
+      ? parsed.toString()
+      : ''
   } catch {
     return ''
   }
@@ -177,8 +180,9 @@ export default function SeoToolPage({ session }) {
         signal: requestController.current.signal,
       }, 60_000)
       if (!response.ok) throw new Error(apiError(data, response.status, '產生失敗'))
-      if (!isRecord(data) || !isRecord(data.revised)) throw new Error('內容服務回傳格式不完整，請稍後再試。')
-      if (mounted.current) setResult(data)
+      const normalized = normalizeSeoResult(data)
+      if (!normalized.ok) throw new Error(normalized.error)
+      if (mounted.current) setResult(normalized.data)
     } catch (submitError) {
       if (submitError?.name !== 'AbortError' && mounted.current) setError(submitError.message || '產生失敗。')
     } finally {

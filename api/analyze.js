@@ -8,6 +8,8 @@ const MAX_QUERY_LENGTH = 200
 const DEFAULT_TIMEOUT_MS = 9000
 const DEFAULT_PUBLIC_TEST_QUERY = '4G 吃到飽'
 const DEFAULT_PUBLIC_TEST_COOLDOWN_MS = 30000
+const MAX_SOURCE_REDIRECTS = 3
+const MAX_PUBLIC_TEST_KEYS = 2048
 const publicTestRuns = new Map()
 
 const STOPWORDS = new Set([
@@ -54,6 +56,18 @@ function isRecord(value) {
 function publicClientKey(req) {
   const forwarded = getHeader(req, 'x-forwarded-for') || getHeader(req, 'x-real-ip') || 'unknown'
   return String(forwarded).split(',')[0].trim().slice(0, 128) || 'unknown'
+}
+
+function prunePublicTestRuns(now, cooldownMs) {
+  const retentionMs = Math.max(cooldownMs * 4, DEFAULT_PUBLIC_TEST_COOLDOWN_MS)
+  for (const [key, timestamp] of publicTestRuns) {
+    if (now - timestamp > retentionMs) publicTestRuns.delete(key)
+  }
+  while (publicTestRuns.size >= MAX_PUBLIC_TEST_KEYS) {
+    const oldest = publicTestRuns.keys().next().value
+    if (oldest === undefined) break
+    publicTestRuns.delete(oldest)
+  }
 }
 
 function isPublicTestQueryAllowed(query, expectedQuery, allowAnyQuery) {
@@ -151,8 +165,10 @@ function isPrivateIp(address) {
       (first === 100 && second >= 64 && second <= 127)
   }
   if (version === 6) {
+    const mappedIpv4 = normalized.startsWith('::ffff:') ? normalized.slice('::ffff:'.length) : ''
+    if (mappedIpv4 && isIP(mappedIpv4) === 4) return isPrivateIp(mappedIpv4)
     return normalized === '::' || normalized === '::1' || normalized.startsWith('fc') ||
-      normalized.startsWith('fd') || normalized.startsWith('fe80:') ||
+      normalized.startsWith('fd') || normalized.startsWith('fe80:') || normalized.startsWith('ff') ||
       normalized.startsWith('::ffff:127.')
   }
   return true
@@ -319,38 +335,60 @@ function extractEntities(query, title, snippet, articleText) {
 }
 
 async function fetchArticle(link) {
-  const normalizedLink = normalizePublicHttpUrl(link)
-  if (!normalizedLink) return { text: '', fetchStatus: 'URL 無效', error: '來源 URL 無效' }
-  const safety = await isSafePublicUrl(normalizedLink)
-  if (!safety.safe) return { text: '', fetchStatus: 'blocked', error: safety.reason }
-  try {
-    const response = await fetchWithTimeout(normalizedLink, {
-      headers: {
-        'User-Agent': 'SERP-Entity-Desk/0.1 (+https://vercel.com)',
-        Accept: 'text/html,application/xhtml+xml',
-      },
-      redirect: 'follow',
-    }, requestTimeoutMs())
-    if (!response.ok) return { text: '', fetchStatus: `HTTP ${response.status}`, error: `來源回傳 ${response.status}` }
-    const contentType = response.headers.get('content-type') || ''
-    if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml')) {
-      return { text: '', fetchStatus: '非 HTML', error: '來源不是 HTML 文章' }
-    }
+  let currentUrl = normalizePublicHttpUrl(link)
+  if (!currentUrl) return { text: '', fetchStatus: 'URL 無效', error: '來源 URL 無效' }
 
-    const html = (await response.text()).slice(0, 1_500_000)
-    const $ = cheerio.load(html)
-    $('script, style, noscript, nav, footer, header, aside, form, iframe, svg, [hidden], [aria-hidden="true"], [class*="cookie"], [id*="cookie"], [class*="consent"], [id*="consent"], [class*="breadcrumb"], [id*="breadcrumb"], [class*="social"], [id*="social"], [class*="pagination"], [id*="pagination"]').remove()
-    const candidates = $('article, main, [role="main"], .article, .article-content, .post-content, .entry-content, #content')
-      .toArray()
-      .map((node) => normalizeText($(node).text()))
-      .filter((text) => text.length > 120)
-    const text = (candidates.sort((a, b) => b.length - a.length)[0] || normalizeText($('body').text())).slice(0, 50000)
-    if (text.length < 80) return { text, fetchStatus: '內容不足', error: '無法取得足夠正文' }
-    return { text, fetchStatus: 'ok' }
+  try {
+    for (let redirectCount = 0; redirectCount <= MAX_SOURCE_REDIRECTS; redirectCount += 1) {
+      const safety = await isSafePublicUrl(currentUrl)
+      if (!safety.safe) return { text: '', fetchStatus: 'blocked', error: safety.reason }
+
+      const response = await fetchWithTimeout(currentUrl, {
+        headers: {
+          'User-Agent': 'SERP-Entity-Desk/0.1 (+https://vercel.com)',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        redirect: 'manual',
+      }, requestTimeoutMs())
+
+      if (response.status >= 300 && response.status < 400) {
+        if (redirectCount === MAX_SOURCE_REDIRECTS) {
+          return { text: '', fetchStatus: '重導向過多', error: '來源重導向次數過多' }
+        }
+        const location = response.headers?.get?.('location')
+        if (!location) return { text: '', fetchStatus: '重導向無效', error: '來源重導向缺少目的地' }
+        try {
+          currentUrl = normalizePublicHttpUrl(new URL(location, currentUrl).toString())
+        } catch {
+          currentUrl = ''
+        }
+        if (!currentUrl) return { text: '', fetchStatus: 'URL 無效', error: '來源重導向目的地無效' }
+        continue
+      }
+
+      if (!response.ok) return { text: '', fetchStatus: `HTTP ${response.status}`, error: `來源回傳 ${response.status}` }
+      const contentType = response.headers.get('content-type') || ''
+      if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml')) {
+        return { text: '', fetchStatus: '非 HTML', error: '來源不是 HTML 文章' }
+      }
+
+      const html = (await response.text()).slice(0, 1_500_000)
+      const $ = cheerio.load(html)
+      $('script, style, noscript, nav, footer, header, aside, form, iframe, svg, [hidden], [aria-hidden="true"], [class*="cookie"], [id*="cookie"], [class*="consent"], [id*="consent"], [class*="breadcrumb"], [id*="breadcrumb"], [class*="social"], [id*="social"], [class*="pagination"], [id*="pagination"]').remove()
+      const candidates = $('article, main, [role="main"], .article, .article-content, .post-content, .entry-content, #content')
+        .toArray()
+        .map((node) => normalizeText($(node).text()))
+        .filter((text) => text.length > 120)
+      const text = (candidates.sort((a, b) => b.length - a.length)[0] || normalizeText($('body').text())).slice(0, 50000)
+      if (text.length < 80) return { text, fetchStatus: '內容不足', error: '無法取得足夠正文' }
+      return { text, fetchStatus: 'ok' }
+    }
   } catch (error) {
     const message = error?.name === 'AbortError' ? '抓取逾時' : '抓取失敗'
     return { text: '', fetchStatus: message, error: message }
   }
+
+  return { text: '', fetchStatus: '抓取失敗', error: '來源處理失敗' }
 }
 
 async function searchSerpApi(query, gl, hl) {
@@ -533,6 +571,7 @@ export default async function handler(req, res) {
     }
     const key = publicClientKey(req)
     const now = Date.now()
+    prunePublicTestRuns(now, publicTestCooldownMs)
     const lastRun = publicTestRuns.get(key) || 0
     const remainingMs = publicTestCooldownMs - (now - lastRun)
     if (remainingMs > 0) {

@@ -6,6 +6,7 @@ import { normalizeSeoResult } from './seo-contract.js'
 
 const recentRequests = new Map()
 const cooldownMs = 20_000
+const maxCooldownKeys = 2048
 
 function parseBody(req) {
   const raw = req?.body
@@ -23,16 +24,30 @@ function clientIp(req) {
   return String(req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || 'unknown')
     .split(',')[0]
     .trim()
+    .slice(0, 128) || 'unknown'
+}
+
+function pruneRecentRequests(now) {
+  for (const [key, timestamp] of recentRequests) {
+    if (now - timestamp > cooldownMs * 4) recentRequests.delete(key)
+  }
+  while (recentRequests.size >= maxCooldownKeys) {
+    const oldest = recentRequests.keys().next().value
+    if (oldest === undefined) break
+    recentRequests.delete(oldest)
+  }
 }
 
 function isCoolingDown(ip) {
   const now = Date.now()
+  pruneRecentRequests(now)
   const previous = recentRequests.get(ip) || 0
-  recentRequests.set(ip, now)
-  for (const [key, timestamp] of recentRequests) {
-    if (now - timestamp > cooldownMs * 4) recentRequests.delete(key)
-  }
-  return now - previous < cooldownMs
+  return previous > 0 && now - previous < cooldownMs
+}
+
+function markCooldown(ip) {
+  pruneRecentRequests(Date.now())
+  recentRequests.set(ip, Date.now())
 }
 
 export const maxDuration = 60
@@ -74,6 +89,7 @@ export default async function handler(req, res) {
   if (!webhookUrl || !proxySecret) return res.status(503).json({ error: 'n8n 正式服務尚未完成設定。' })
 
   const requestId = `formal-${randomUUID()}`
+  markCooldown(cooldownKey)
 
   const payload = {
     ...parsed.value,

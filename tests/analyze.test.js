@@ -20,6 +20,8 @@ test('blocks private and loopback IP ranges', () => {
   assert.equal(isPrivateIp('172.16.0.9'), true)
   assert.equal(isPrivateIp('192.168.1.20'), true)
   assert.equal(isPrivateIp('::1'), true)
+  assert.equal(isPrivateIp('::ffff:192.168.1.20'), true)
+  assert.equal(isPrivateIp('ff02::1'), true)
   assert.equal(isPrivateIp('8.8.8.8'), false)
 })
 
@@ -191,6 +193,57 @@ test('keeps article rows when individual source fetches fail', async () => {
     assert.equal(response.body.result.articles.length, 2)
     assert.equal(response.body.result.articles.every((article) => article.entityCount >= 0), true)
     assert.equal(response.body.result.articles.some((article) => article.fetchStatus !== 'ok'), true)
+  } finally {
+    if (previousMode === undefined) delete process.env.PUBLIC_TEST_MODE
+    else process.env.PUBLIC_TEST_MODE = previousMode
+    if (previousAllowAny === undefined) delete process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+    else process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = previousAllowAny
+    if (previousCooldown === undefined) delete process.env.PUBLIC_TEST_COOLDOWN_MS
+    else process.env.PUBLIC_TEST_COOLDOWN_MS = previousCooldown
+    if (previousKey === undefined) delete process.env.SERPAPI_KEY
+    else process.env.SERPAPI_KEY = previousKey
+    globalThis.fetch = previousFetch
+  }
+})
+
+test('rechecks redirect destinations before fetching article content', async () => {
+  const previousMode = process.env.PUBLIC_TEST_MODE
+  const previousAllowAny = process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+  const previousCooldown = process.env.PUBLIC_TEST_COOLDOWN_MS
+  const previousKey = process.env.SERPAPI_KEY
+  const previousFetch = globalThis.fetch
+  let articleFetches = 0
+  try {
+    process.env.PUBLIC_TEST_MODE = 'true'
+    process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = 'true'
+    process.env.PUBLIC_TEST_COOLDOWN_MS = '0'
+    process.env.SERPAPI_KEY = 'test-key'
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://serpapi.com/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ organic_results: [
+            { position: 1, link: 'https://8.8.8.8/redirect', title: '重導向文章', snippet: '' },
+          ] }),
+        }
+      }
+      articleFetches += 1
+      return {
+        ok: false,
+        status: 302,
+        headers: { get: () => 'http://127.0.0.1/admin' },
+      }
+    }
+    const response = await new Promise((resolve) => analyzeHandler(
+      { method: 'POST', headers: {}, body: { query: '重導向安全測試' } },
+      mockResponse(resolve),
+    ))
+    assert.equal(response.status, 200)
+    assert.equal(articleFetches, 1)
+    assert.equal(response.body.result.articles[0].fetchStatus, 'blocked')
+    assert.match(response.body.result.articles[0].fetchError, /私有|loopback/)
   } finally {
     if (previousMode === undefined) delete process.env.PUBLIC_TEST_MODE
     else process.env.PUBLIC_TEST_MODE = previousMode
