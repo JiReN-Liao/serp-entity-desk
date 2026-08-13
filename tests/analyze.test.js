@@ -98,6 +98,19 @@ test('filters number-plus-unit fragments without removing meaningful product tok
   }
 })
 
+test('filters signed and ranked numeric fragments from arbitrary queries', () => {
+  const entities = extractEntities(
+    '排序測試',
+    '20 10 12 60 2026 +114 第10名 No.12',
+    '20 10 12 60 2026 +114 第10名 No.12',
+    '20 10 12 60 2026 +114 第10名 No.12 20 10 12 60 2026 +114 第10名 No.12',
+  )
+  const names = new Set(entities.map((entity) => entity.name))
+  for (const value of ['20', '10', '12', '60', '2026', '+114', '第10名', 'No.12']) {
+    assert.equal(names.has(value), false, `numeric or ranked token leaked: ${value}`)
+  }
+})
+
 test('merges case variants of the same Latin entity', () => {
   const entities = extractEntities(
     'iPhone 16',
@@ -111,6 +124,7 @@ test('merges case variants of the same Latin entity', () => {
 test('entity extraction tolerates missing or non-text source fields', () => {
   assert.doesNotThrow(() => extractEntities(null, undefined, { title: 'not text' }, ['unexpected']))
   assert.deepEqual(extractEntities(null, undefined, { title: 'not text' }, ['unexpected']), [])
+  assert.doesNotThrow(() => extractEntities('4G 吃到飽', undefined, '資費方案', '4G 吃到飽 資費方案'))
 })
 
 test('malformed request bodies return validation errors instead of throwing', async () => {
@@ -121,6 +135,56 @@ test('malformed request bodies return validation errors instead of throwing', as
     ))
     assert.equal(response.status, 400)
     assert.match(response.body.error, /query 必須/)
+  }
+})
+
+test('normalizes SERP positions to the returned first-page order', async () => {
+  const previousMode = process.env.PUBLIC_TEST_MODE
+  const previousAllowAny = process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+  const previousCooldown = process.env.PUBLIC_TEST_COOLDOWN_MS
+  const previousKey = process.env.SERPAPI_KEY
+  const previousFetch = globalThis.fetch
+  try {
+    process.env.PUBLIC_TEST_MODE = 'true'
+    process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = 'true'
+    process.env.PUBLIC_TEST_COOLDOWN_MS = '0'
+    process.env.SERPAPI_KEY = 'test-key'
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://serpapi.com/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ organic_results: [
+            { position: 20, link: 'https://8.8.8.8/first', title: '第一篇', snippet: '' },
+            { position: 10, link: 'https://8.8.8.8/second', title: '第二篇', snippet: '' },
+            { position: 12, link: 'https://8.8.8.8/third', title: '第三篇', snippet: '' },
+          ] }),
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'text/html; charset=utf-8' },
+        text: async () => `<html><body><article>${'排序測試文章內容與方案比較。'.repeat(24)}</article></body></html>`,
+      }
+    }
+    const response = await new Promise((resolve) => analyzeHandler(
+      { method: 'POST', headers: { 'x-forwarded-for': '192.0.2.11' }, body: { query: '排序測試' } },
+      mockResponse(resolve),
+    ))
+    assert.equal(response.status, 200)
+    assert.deepEqual(response.body.result.articles.map((article) => article.position), [1, 2, 3])
+  } finally {
+    if (previousMode === undefined) delete process.env.PUBLIC_TEST_MODE
+    else process.env.PUBLIC_TEST_MODE = previousMode
+    if (previousAllowAny === undefined) delete process.env.PUBLIC_TEST_ALLOW_ANY_QUERY
+    else process.env.PUBLIC_TEST_ALLOW_ANY_QUERY = previousAllowAny
+    if (previousCooldown === undefined) delete process.env.PUBLIC_TEST_COOLDOWN_MS
+    else process.env.PUBLIC_TEST_COOLDOWN_MS = previousCooldown
+    if (previousKey === undefined) delete process.env.SERPAPI_KEY
+    else process.env.SERPAPI_KEY = previousKey
+    globalThis.fetch = previousFetch
   }
 })
 

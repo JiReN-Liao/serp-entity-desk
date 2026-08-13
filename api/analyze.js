@@ -240,6 +240,8 @@ function isStopword(value) {
 function isNoiseToken(value) {
   const normalized = String(value || '').trim()
   if (!normalized || isNumericLikeToken(normalized) || isStopword(normalized)) return true
+  if (/^[+#-]?\d+(?:[.,/-]\d+)*$/.test(normalized)) return true
+  if (/^No\.?\d+$/i.test(normalized)) return true
   if (/^v?\d+(?:[._/-]\d+)+$/i.test(normalized)) return true
   if (/^\d{2,4}年(?:\d{1,2}月(?:\d{1,2}日?)?)?$/u.test(normalized)) return true
   if (/^\d+(?:[.,/-]\d+)*(?:年|月|日|號|元|塊|折|期|次|個|件|人|名|篇|頁|歲|天|週|周|小時|分鐘|分|秒|%|％)$/u.test(normalized)) return true
@@ -323,7 +325,7 @@ function extractEntities(query, title, snippet, articleText) {
     })
     .filter((entity) => {
       if (isNoiseToken(entity.name)) return false
-      const inTitle = title.toLowerCase().includes(entity.name.toLowerCase())
+      const inTitle = normalizedTitle.toLowerCase().includes(entity.name.toLowerCase())
       const knownTopic = entity.topic !== '其他'
       const mixedToken = /[A-Za-z]/.test(entity.name) && /\d/.test(entity.name)
       return entity.frequency > 0 && (knownTopic || inTitle || entity.frequency >= 2 || mixedToken)
@@ -414,7 +416,7 @@ async function searchSerpApi(query, gl, hl) {
         title: normalizeText(item.title) || '未命名文章',
         snippet: normalizeText(item.snippet),
         source: normalizeText(item.source),
-        position: safePositiveInteger(item.position, index + 1),
+        position: index + 1,
       }
     })
     .filter(Boolean)
@@ -493,7 +495,7 @@ async function analyze(query, gl, hl) {
     const snippet = normalizeText(item.snippet)
     const link = normalizePublicHttpUrl(item.link)
     const fallback = {
-      position: safePositiveInteger(item.position, index + 1),
+      position: index + 1,
       title,
       source: normalizeText(item.source) || safeSource(link),
       link,
